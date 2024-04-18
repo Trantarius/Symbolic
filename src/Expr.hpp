@@ -40,7 +40,7 @@ public:
 	virtual Arity get_arity() const = 0;
 	virtual string to_string() const = 0;
 	virtual uint64_t hash() const = 0;
-	virtual bool is_identical(Ref<const Expr> expr) const = 0;
+	virtual bool is_identical(Ref<Expr> expr) const = 0;
 
 	class Iterator{
 		Ref<Expr> owner;
@@ -60,37 +60,23 @@ public:
 		friend class Expr;
 	};
 
-	class ConstIterator{
-		Ref<const Expr> owner;
-		long child_idx = 0;
-		ConstIterator(Ref<const Expr> owner, long child_idx): owner(owner), child_idx(child_idx) {}
-	public:
-		ConstIterator()=default;
-		ConstIterator(const ConstIterator&)=default;
-		bool operator == (const ConstIterator& b) const { return owner==b.owner && child_idx==b.child_idx; }
-		bool operator != (const ConstIterator& b) const { return !(*this==b); }
-		const Ref<const Expr>& operator * () const ;
-		const Ref<const Expr>& operator -> () const ;
-		ConstIterator& operator ++ () { ++child_idx; return *this; }
-		ConstIterator operator ++ (int) { return ConstIterator(owner,child_idx++); }
-		ConstIterator& operator -- () { --child_idx; return *this; }
-		ConstIterator operator -- (int) { return ConstIterator(owner,child_idx--); }
-		friend class Expr;
-	};
-
 	Iterator begin() ;
 	Iterator end() ;
-	ConstIterator begin() const ;
-	ConstIterator end() const ;
 
 	static Ref<Expr> from_string(string str);
 };
 
-struct ExprSyntaxError : public std::runtime_error{};
+struct ExprSyntaxError : public std::runtime_error{
+	ExprSyntaxError():std::runtime_error("Expr Syntax Error"){}
+	ExprSyntaxError(string what):std::runtime_error(what){}
+};
 
 struct NullaryExpr : public Expr{
 	virtual Arity get_arity() const override{
 		return NULLARY;
+	}
+	virtual string to_string() const override{
+		return Expr::type_to_string(get_type());
 	}
 };
 
@@ -104,11 +90,14 @@ struct UnaryExpr : public Expr{
 		h = (h<<13) ^ (h>>51);
 		return (h<<(get_type()%64)) ^ (h>>(64-get_type()%64));
 	}
-	virtual bool is_identical(Ref<const Expr> expr) const override{
+	virtual bool is_identical(Ref<Expr> expr) const override{
 		if(get_type()!=expr->get_type())
 			return false;
-		Ref<const UnaryExpr> uexpr = expr.cast_to<const UnaryExpr>();
+		Ref<UnaryExpr> uexpr = expr.cast_to<UnaryExpr>();
 		return child->is_identical(uexpr->child);
+	}
+	virtual string to_string() const override{
+		return Expr::type_to_string(get_type()) + "(" + child->to_string() + ")";
 	}
 };
 
@@ -123,11 +112,14 @@ struct BinaryExpr : public Expr{
 		uint64_t h = (lh>>13)^(lh<<51)^(rh<<13)^(rh>>51) ^ get_type();
 		return (h<<(get_type()%64)) ^ (h>>(64-get_type()%64));
 	}
-	virtual bool is_identical(Ref<const Expr> expr) const override{
+	virtual bool is_identical(Ref<Expr> expr) const override{
 		if(get_type()!=expr->get_type())
 			return false;
-		Ref<const BinaryExpr> biexpr = expr.cast_to<const BinaryExpr>();
+		Ref<BinaryExpr> biexpr = expr.cast_to<BinaryExpr>();
 		return left->is_identical(biexpr->left) && right->is_identical(biexpr->right);
+	}
+	virtual string to_string() const override{
+		return Expr::type_to_string(get_type()) + "(" + left->to_string() + ", " + right->to_string() + ")";
 	}
 };
 
@@ -143,10 +135,10 @@ struct InfinitaryExpr : public Expr{
 		}
 		return (h<<(get_type()%64)) ^ (h>>(64-get_type()%64));
 	}
-	virtual bool is_identical(Ref<const Expr> expr) const override{
+	virtual bool is_identical(Ref<Expr> expr) const override{
 		if(get_type()!=expr->get_type())
 			return false;
-		Ref<const InfinitaryExpr> iexpr = expr.cast_to<const InfinitaryExpr>();
+		Ref<InfinitaryExpr> iexpr = expr.cast_to<InfinitaryExpr>();
 		if(children->size()!=iexpr->children->size())
 			return false;
 		Array<Ref<Expr>>::const_iterator a_child = children->begin();
@@ -159,13 +151,20 @@ struct InfinitaryExpr : public Expr{
 		}
 		return true;
 	}
+	virtual string to_string() const override{
+		string out="";
+		for(Ref<Expr> child : *children){
+			out+=child->to_string()+", ";
+		}
+		return Expr::type_to_string(get_type()) + "(" + out.substr(0,out.size()-2) + ")";
+	}
 };
 
 struct Add : public InfinitaryExpr{
 	virtual Type get_type() const override{ return ADD;}
 	virtual string to_string() const override{
 		string out="";
-		for(Ref<Expr> child : children){
+		for(Ref<Expr> child : *children){
 			out+=child->to_string()+" + ";
 		}
 		return out.substr(0,out.size()-3);
@@ -188,7 +187,7 @@ struct Multiply : public InfinitaryExpr{
 	virtual Type get_type() const override{ return MULTIPLY;}
 	virtual string to_string() const override{
 		string out="";
-		for(Ref<Expr> child : children){
+		for(Ref<Expr> child : *children){
 			if(child->get_type()==ADD||child->get_type()==SUBTRACT)
 				out+="("+child->to_string()+") * ";
 			else

@@ -5,7 +5,7 @@
 
 class RefCounted;
 
-template<typename T>
+template<typename T> requires (!std::is_const<T>::value)
 class Ref;
 
 template<typename T>
@@ -14,8 +14,8 @@ class Array;
 class RefCounted{
 	size_t refcount=0;
 protected:
-	explicit RefCounted(){}
-	template<typename T>
+	RefCounted()=default;
+	template<typename T> requires (!std::is_const<T>::value)
 	friend class Ref;
 
 	RefCounted(const RefCounted& b)=delete;
@@ -23,10 +23,12 @@ protected:
 
 #ifndef NDEBUG
 template<typename T>
-struct NullRefException : public std::runtime_error{};
+struct NullRefException : public std::runtime_error{
+	NullRefException():std::runtime_error("Null Reference"){}
+};
 #endif
 
-template<typename Type>
+template<typename Type> requires (!std::is_const<Type>::value)
 class Ref{
 protected:
 	Type* ptr = nullptr;
@@ -42,7 +44,7 @@ protected:
 			ptr->refcount++;
 		}
 	}
-	typedef std::add_const<Type>::type ConstType;
+
 public:
 	~Ref(){
 		set_to(nullptr);
@@ -84,10 +86,6 @@ public:
 		}
 #endif
 		return ptr;
-	}
-
-	operator Ref<const Type>() const {
-		return Ref<const Type>(ptr);
 	}
 
 	Type* get_ptr() const{
