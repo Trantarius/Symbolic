@@ -163,7 +163,7 @@ std::vector<string> escape_brackets(string& str){
 		str.replace(rex_result.position(),rex_result.length(), "\x1F"+std::to_string(bracketed.size()-1)+"\x1F");
 	}
 
-	static const std::regex contains_bracket_rex("(.*)([\\(\\)\\[\\]\\{\\}])(.*)");
+	static const std::regex contains_bracket_rex(".*([\\(\\)\\[\\]\\{\\}]).*");
 	if(std::regex_match(str,rex_result,contains_bracket_rex))
 		throw SyntaxError("unbalanced bracket: "+rex_result[1].str());
 

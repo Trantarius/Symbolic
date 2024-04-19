@@ -14,7 +14,7 @@ struct Expr {
 		inline static uint64_t last_id=0;
 		struct cmp_types{
 			bool operator()(const Type* a, const Type* b) const {
-				return a->pemdas < b->pemdas;
+				return a->pemdas > b->pemdas;
 			}
 		};
 	public:
