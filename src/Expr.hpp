@@ -1,58 +1,102 @@
 #pragma once
 
 #include <string>
-#include <cstdint>
-
-#include "refcount.hpp"
+#include <deque>
+#include <unordered_map>
+#include <set>
+#include <regex>
 
 using std::string;
 
-class Expr;
+struct Expr {
 
-class Expr : public RefCounted{
+	class Type{
+		inline static uint64_t last_id=0;
+		struct cmp_types{
+			bool operator()(const Type* a, const Type* b) const {
+				return a->pemdas < b->pemdas;
+			}
+		};
+	public:
+		inline static std::multiset<const Type*,cmp_types> all_known_types;
+		uint64_t id=last_id++ * 313 + 727;
+		string name;
+		std::regex parser;
+		string printer;
+		std::vector<string> operators;
+		enum Arity{NULLARY,UNARY,BINARY,TERNARY,INFINITARY};
+		Arity arity;
+		// determines parsing order and if parentheses are needed for to_string
+		// <0 disables parentheses
+		int pemdas;
+		Type()=delete;
+		Type(const Type&)=delete;
+		Type(string name, string parser, string printer, std::initializer_list<string> operators,
+				 Arity arity, int pemdas): name(name), parser(parser), printer(printer),
+				 operators(operators), arity(arity),pemdas(pemdas){
+				all_known_types.insert(this);
+			};
+		bool operator==(const Type& b) const { return id==b.id; }
+		bool operator!=(const Type& b) const { return id!=b.id; }
+		Expr operator()() const;
+		Expr operator()(const std::initializer_list<Expr>& il) const;
+	};
+
+	inline static const Type Add{"Add", "(.*?)\\+(.*)", "$1+$2", {"+"}, Type::INFINITARY,60};
+	inline static const Type Sub{"Sub", "(.*?)-(.*)", "$1-$2", {"-"}, Type::BINARY,50};
+	inline static const Type Mul{"Mul", "(.*?)\\*(.*)", "$1*$2", {"*"}, Type::INFINITARY,40};
+	inline static const Type Div{"Div", "(.*?)/(.*)", "$1/$2", {"/"}, Type::BINARY,30};
+	inline static const Type Neg{"Neg", "\\s*-(.*)", "-$1", {"-"}, Type::UNARY,20};
+	inline static const Type Pow{"Pow", "(.*)\\^(.*)", "$1^$2", {"^"}, Type::BINARY,10};
+	inline static const Type Symbol{"Symbol", "\\s*(\\w+)\\s*", "", {}, Type::NULLARY,-10};
+	inline static const Type Number{"Number", "\\s*(\\d+)\\s*", "", {}, Type::NULLARY,-10};
+	inline static const Type Undefined{"Undefined", "", "∅", {},Type::NULLARY,-1000};
+
+private:
+	inline static std::vector<string> symbol_names;
+	inline static std::unordered_map<string,long> symbol_ids;
+	const Type* _type = &Undefined;
+	std::deque<Expr> _children;
+	int64_t _value=0;
 public:
-	enum Type{ADD,SUBTRACT,MULTIPLY,DIVIDE,NEGATE,EXPONENT,SYMBOL,NUMBER};
-	inline static string type_to_string(Type type){
-		switch(type){
-			case ADD: return "ADD";
-			case SUBTRACT: return "SUBTRACT";
-			case MULTIPLY: return "MULTIPLY";
-			case DIVIDE: return "DIVIDE";
-			case NEGATE: return "NEGATE";
-			case EXPONENT: return "EXPONENT";
-			case SYMBOL: return "SYMBOL";
-			case NUMBER: return "NUMBER";
-		}
-	}
 
-	enum Arity{NULLARY,UNARY,BINARY,INFINITARY};
-	inline static string arity_to_string(Arity arity){
-		switch(arity){
-			case NULLARY: return "NULLARY";
-			case UNARY: return "UNARY";
-			case BINARY: return "BINARY";
-			case INFINITARY: return "INFINITARY";
-		}
+	Expr()=default;
+	Expr(const Expr&)=default;
+	Expr(Expr&& ex):_children(std::move(ex._children)),_type(ex._type),_value(ex._value){
+		ex._type=&Undefined;
 	}
+	Expr(const Type& type);
+	Expr(const Type& type, const std::initializer_list<Expr>& il);
+	Expr(string str);
 
-public:
-	virtual Type get_type() const = 0;
-	virtual Arity get_arity() const = 0;
-	virtual string to_string() const = 0;
-	virtual uint64_t hash() const = 0;
-	virtual bool is_identical(Ref<Expr> expr) const = 0;
+	const Type& type() const {return *_type; }
+	uint64_t hash() const;
+	bool is_identical(const Expr& epxr) const;
+
+	Expr& operator=(const Expr&)=default;
+	Expr& operator=(Expr&& b) {
+		_type=b._type;
+		_children=std::move(b._children);
+		_value = b._value;
+		return *this;
+	};
+
+	Expr& operator[](long n);
+	const Expr& operator[](long n) const;
+	long child_count() const { return _children.size(); }
+	void add_child(const Expr& expr);
 
 	class Iterator{
-		Ref<Expr> owner;
+		Expr* owner = nullptr;
 		long child_idx = 0;
-		Iterator(Ref<Expr> owner, long child_idx): owner(owner), child_idx(child_idx) {}
+		Iterator(Expr* owner, long child_idx): owner(owner), child_idx(child_idx) {}
 	public:
 		Iterator()=default;
 		Iterator(const Iterator&)=default;
 		bool operator == (const Iterator& b) const { return owner==b.owner && child_idx==b.child_idx; }
 		bool operator != (const Iterator& b) const { return !(*this==b); }
-		Ref<Expr>& operator * () const ;
-		Ref<Expr>& operator -> () const ;
+		Expr& operator * () const { return owner->_children[child_idx]; }
+		Expr& operator -> () const { return owner->_children[child_idx]; }
 		Iterator& operator ++ () { ++child_idx; return *this; }
 		Iterator operator ++ (int) { return Iterator(owner,child_idx++); }
 		Iterator& operator -- () { --child_idx; return *this; }
@@ -60,194 +104,58 @@ public:
 		friend class Expr;
 	};
 
-	Iterator begin() ;
-	Iterator end() ;
+	class ConstIterator{
+		const Expr* owner = nullptr;
+		long child_idx = 0;
+		ConstIterator(const Expr* owner, long child_idx): owner(owner), child_idx(child_idx) {}
+	public:
+		ConstIterator()=default;
+		ConstIterator(const ConstIterator&)=default;
+		bool operator == (const ConstIterator& b) const { return owner==b.owner && child_idx==b.child_idx; }
+		bool operator != (const ConstIterator& b) const { return !(*this==b); }
+		const Expr& operator * () const { return owner->_children[child_idx]; }
+		const Expr& operator -> () const { return owner->_children[child_idx]; }
+		ConstIterator& operator ++ () { ++child_idx; return *this; }
+		ConstIterator operator ++ (int) { return ConstIterator(owner,child_idx++); }
+		ConstIterator& operator -- () { --child_idx; return *this; }
+		ConstIterator operator -- (int) { return ConstIterator(owner,child_idx--); }
+		friend class Expr;
+	};
 
-	static Ref<Expr> from_string(string str);
+	Iterator begin() { return Iterator(this,0); }
+	Iterator end() { return Iterator(this,_children.size()); }
+	ConstIterator begin() const { return ConstIterator(this,0); }
+	ConstIterator end() const { return ConstIterator(this,_children.size()); }
+
+	friend bool string_to_expr_type(string str, const std::vector<string>& bracketed, const Expr::Type& type, Expr& out);
+	friend string to_string(const Expr& expr);
 };
 
-struct ExprSyntaxError : public std::runtime_error{
-	ExprSyntaxError():std::runtime_error("Expr Syntax Error"){}
-	ExprSyntaxError(string what):std::runtime_error(what){}
+
+
+string to_string(const Expr& expr);
+
+
+
+
+
+struct ExprError : public std::runtime_error{
+	Expr subject;
+	ExprError(const Expr& subject, string what):std::runtime_error(what),subject(subject){}
 };
 
-struct NullaryExpr : public Expr{
-	virtual Arity get_arity() const override{
-		return NULLARY;
-	}
-	virtual string to_string() const override{
-		return Expr::type_to_string(get_type());
-	}
+struct SyntaxError : public std::runtime_error{
+	using std::runtime_error::runtime_error;
 };
-
-struct UnaryExpr : public Expr{
-	Ref<Expr> child;
-	virtual Arity get_arity() const override{
-		return UNARY;
-	}
-	virtual uint64_t hash() const override {
-		uint64_t h = child->hash() ^ get_type();
-		h = (h<<13) ^ (h>>51);
-		return (h<<(get_type()%64)) ^ (h>>(64-get_type()%64));
-	}
-	virtual bool is_identical(Ref<Expr> expr) const override{
-		if(get_type()!=expr->get_type())
-			return false;
-		Ref<UnaryExpr> uexpr = expr.cast_to<UnaryExpr>();
-		return child->is_identical(uexpr->child);
-	}
-	virtual string to_string() const override{
-		return Expr::type_to_string(get_type()) + "(" + child->to_string() + ")";
-	}
+struct MissingOperand : public SyntaxError{
+protected:
+	MissingOperand(string which, string oper):SyntaxError("missing "+which+" operand for "+oper){}
+public:
+	MissingOperand(string oper):SyntaxError("missing operand for "+oper){}
 };
-
-struct BinaryExpr : public Expr{
-	Ref<Expr> left,right;
-	virtual Arity get_arity() const override{
-		return BINARY;
-	}
-	virtual uint64_t hash() const override {
-		uint64_t lh = left->hash();
-		uint64_t rh = right->hash();
-		uint64_t h = (lh>>13)^(lh<<51)^(rh<<13)^(rh>>51) ^ get_type();
-		return (h<<(get_type()%64)) ^ (h>>(64-get_type()%64));
-	}
-	virtual bool is_identical(Ref<Expr> expr) const override{
-		if(get_type()!=expr->get_type())
-			return false;
-		Ref<BinaryExpr> biexpr = expr.cast_to<BinaryExpr>();
-		return left->is_identical(biexpr->left) && right->is_identical(biexpr->right);
-	}
-	virtual string to_string() const override{
-		return Expr::type_to_string(get_type()) + "(" + left->to_string() + ", " + right->to_string() + ")";
-	}
-};
-
-struct InfinitaryExpr : public Expr{
-	Ref<Array<Ref<Expr>>> children = new Array<Ref<Expr>>();
-	virtual Arity get_arity() const override{
-		return INFINITARY;
-	}
-	virtual uint64_t hash() const override {
-		uint64_t h = get_type();
-		for(Ref<Expr> child : *children){
-			h = (h<<13)^(h>>51)^child->hash();
-		}
-		return (h<<(get_type()%64)) ^ (h>>(64-get_type()%64));
-	}
-	virtual bool is_identical(Ref<Expr> expr) const override{
-		if(get_type()!=expr->get_type())
-			return false;
-		Ref<InfinitaryExpr> iexpr = expr.cast_to<InfinitaryExpr>();
-		if(children->size()!=iexpr->children->size())
-			return false;
-		Array<Ref<Expr>>::const_iterator a_child = children->begin();
-		Array<Ref<Expr>>::const_iterator b_child = iexpr->children->begin();
-		while(a_child!=children->end()){
-			if(!(*a_child)->is_identical(*b_child))
-				return false;
-			a_child++;
-			b_child++;
-		}
-		return true;
-	}
-	virtual string to_string() const override{
-		string out="";
-		for(Ref<Expr> child : *children){
-			out+=child->to_string()+", ";
-		}
-		return Expr::type_to_string(get_type()) + "(" + out.substr(0,out.size()-2) + ")";
-	}
-};
-
-struct Add : public InfinitaryExpr{
-	virtual Type get_type() const override{ return ADD;}
-	virtual string to_string() const override{
-		string out="";
-		for(Ref<Expr> child : *children){
-			out+=child->to_string()+" + ";
-		}
-		return out.substr(0,out.size()-3);
-	}
-};
-
-struct Subtract : public BinaryExpr{
-	virtual Type get_type() const override{ return SUBTRACT;}
-	virtual string to_string() const override{
-		string right_string;
-		if(right->get_type()==ADD||right->get_type()==SUBTRACT)
-			right_string="("+right->to_string()+")";
-		else
-			right_string=right->to_string();
-		return left->to_string()+" - "+right_string;
-	}
-};
-
-struct Multiply : public InfinitaryExpr{
-	virtual Type get_type() const override{ return MULTIPLY;}
-	virtual string to_string() const override{
-		string out="";
-		for(Ref<Expr> child : *children){
-			if(child->get_type()==ADD||child->get_type()==SUBTRACT)
-				out+="("+child->to_string()+") * ";
-			else
-				out+=child->to_string()+" * ";
-		}
-		return out.substr(0,out.size()-3);
-	}
-};
-
-struct Divide : public BinaryExpr{
-virtual Type get_type() const override{ return DIVIDE;}
-	virtual string to_string() const override{
-		string left_string,right_string;
-		if(left->get_type()==ADD||left->get_type()==SUBTRACT)
-			left_string="("+left->to_string()+")";
-		else
-			left_string=left->to_string();
-		if(right->get_type()==ADD||right->get_type()==SUBTRACT||right->get_type()==MULTIPLY||right->get_type()==DIVIDE)
-			right_string="("+right->to_string()+")";
-		else
-			right_string=right->to_string();
-		return left_string+" / "+right_string;
-	}
-};
-
-struct Negate : public UnaryExpr{
-virtual Type get_type() const override{ return NEGATE;}
-	virtual string to_string() const override{
-		string left_string,right_string;
-		if(child->get_type()==ADD||child->get_type()==SUBTRACT||child->get_type()==EXPONENT)
-			return "-("+child->to_string()+")";
-		else
-			return "-"+child->to_string();
-	}
-};
-
-struct Exponent : public BinaryExpr{
-virtual Type get_type() const override{ return EXPONENT;}
-	virtual string to_string() const override{
-		string left_string,right_string;
-		if(left->get_type()==ADD||left->get_type()==SUBTRACT||left->get_type()==MULTIPLY||left->get_type()==DIVIDE||left->get_type()==EXPONENT)
-			left_string="("+left->to_string()+")";
-		else
-			left_string=left->to_string();
-		if(right->get_type()==ADD||right->get_type()==SUBTRACT||right->get_type()==MULTIPLY||right->get_type()==DIVIDE)
-			right_string="("+right->to_string()+")";
-		else
-			right_string=right->to_string();
-		return left_string+" ^ "+right_string;
-	}
-};
-
-struct Symbol : public NullaryExpr{
-	string name;
-	virtual Type get_type() const override { return SYMBOL;}
-	virtual string to_string() const override { return name;}
-};
-
-struct Number : public NullaryExpr{
-	int64_t value;
-	virtual Type get_type() const override { return NUMBER;}
-	virtual string to_string() const override { return std::to_string(value);}
-};
+struct MissingLeftOperand : public MissingOperand{
+	MissingLeftOperand(string oper):MissingOperand("left",oper){} };
+struct MissingCenterOperand : public MissingOperand{
+	MissingCenterOperand(string oper):MissingOperand("center",oper){} };
+struct MissingRightOperand : public MissingOperand{
+	MissingRightOperand(string oper):MissingOperand("right",oper){} };
