@@ -42,6 +42,7 @@ struct Expr {
 		Expr operator()(const std::initializer_list<Expr>& il) const;
 	};
 
+	inline static const Type List{"List", "(.*?),(.*)", "$1,$2", {","}, Type::INFINITARY,1000};
 	inline static const Type Add{"Add", "(.*?)\\+(.*)", "$1+$2", {"+"}, Type::INFINITARY,60};
 	inline static const Type Sub{"Sub", "(.*?)-(.*)", "$1-$2", {"-"}, Type::BINARY,50};
 	inline static const Type Mul{"Mul", "(.*?)\\*(.*)", "$1*$2", {"*"}, Type::INFINITARY,40};
