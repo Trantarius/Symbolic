@@ -82,6 +82,7 @@ Main::Main(const std::vector<string>& args){
 			return;
 		}
 		positional.pop_front();
+		is_input_set=true;
 		interactive=false;
 	}
 
@@ -93,13 +94,16 @@ Main::Main(const std::vector<string>& args){
 			status=1;
 			return;
 		}
+		is_output_set=true;
 		positional.pop_front();
 	}
-}
 
-struct LineConsumeError : public std::runtime_error{
-	using std::runtime_error::runtime_error;
-};
+	if(is_output_set && !is_input_set){
+		std::cout<<"An input must be specified if the output is specified"<<std::endl;
+		status=1;
+		return;
+	}
+}
 
 void Main::main_loop(){
 
