@@ -49,14 +49,14 @@ Expr::Expr(const Type& type, const std::initializer_list<Expr>& il):_type(&type)
 	_children = std::deque<Expr>(il);
 }
 
-Expr& Expr::operator[](long n){
-	if(n>=0 && n<_children.size())
+Expr& Expr::operator[](size_t n){
+	if(n<_children.size())
 		return _children[n];
 	else
 		throw ExprError(*this,"expr does not have a child at index "+std::to_string(n));
 }
-const Expr& Expr::operator[](long n) const{
-	if(n>=0 && n<_children.size())
+const Expr& Expr::operator[](size_t n) const{
+	if(n<_children.size())
 		return _children[n];
 	else
 		throw ExprError(*this,"expr does not have a child at index "+std::to_string(n));

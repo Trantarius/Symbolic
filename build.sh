@@ -1,7 +1,6 @@
 mkdir build
 cd build
-cmake ..
-make
+cmake -DCMAKE_INSTALL_PREFIX=~/.local ..
 make install
 cd ..
 mv ./build/compile_commands.json ./compile_commands.json

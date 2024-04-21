@@ -1,167 +1,27 @@
 #include "main.hpp"
 
+#include <xeus/xkernel.hpp>
+#include <xeus/xkernel_configuration.hpp>
+#include <xeus-zmq/xserver_zmq.hpp>
+#include <xeus-zmq/xzmq_context.hpp>
+#include <xeus/xhelper.hpp>
+
 int main (int argc, char **argv){
 
-	std::vector<string> args;
-	for(int n=1;n<argc;n++){
-		args.push_back(argv[n]);
+	if(argc<2){
+		std::cerr<<"Expected connection file path";
+		return 1;
 	}
 
-	Main m(args);
-	m.main_loop();
+	std::unique_ptr<Main> mptr(new Main());
+	xeus::xconfiguration config = xeus::load_configuration(argv[1]);
 
-	return m.status;
-}
+	auto context = xeus::make_zmq_context();
 
-Main::Main(const std::vector<string>& args){
-	bool is_input_set=false;
-	bool is_output_set=false;
-	std::deque<string> positional;
-	for(int n=0; n<args.size(); n++){
-		if(args[n]=="-in"||args[n]=="-i"){
-			if(is_input_set){
-				std::cout<<"Cannot specify '-in' more than once"<<std::endl;
-				status=1;
-				return;
-			}
-			if(n+1>=args.size()){
-				std::cout<<"Expected path after '-in'"<<std::endl;
-				status=1;
-				return;
-			}
-			string path = args[n+1];
-			file_in.reset(new std::ifstream(path));
-			input=file_in.get();
-			if(!input->good()){
-				std::cout<<"Couldn't open "+path<<std::endl;
-				status=1;
-				return;
-			}
-			n++;
-			is_input_set=true;
-			interactive=false;
-		}
-		else if(args[n]=="-out"||args[n]=="-o"){
-			if(is_output_set){
-				std::cout<<"Cannot specify '-out' more than once"<<std::endl;
-				status=1;
-				return;
-			}
-			if(n+1>=args.size()){
-				std::cout<<"Expected path after '-out'"<<std::endl;
-				status=1;
-				return;
-			}
-			string path = args[n+1];
-			file_out.reset(new std::ofstream(path));
-			output=file_out.get();
-			if(!output->good()){
-				std::cout<<"Couldn't open "+path<<std::endl;
-				status=1;
-				return;
-			}
-			n++;
-			is_output_set=true;
-		}
-		else if(args[n][0]=='-'){
-			std::cout<<"Unknown option: '"+args[n]+"'"<<std::endl;
-			status=1;
-			return;
-		}
-		else{
-			positional.push_back(args[n]);
-		}
-	}
-
-	if(!is_input_set && !positional.empty()){
-		file_in.reset(new std::ifstream(positional.front()));
-		input=file_in.get();
-		if(!input->good()){
-			std::cout<<"Couldn't open "+positional.front()<<std::endl;
-			status=1;
-			return;
-		}
-		positional.pop_front();
-		is_input_set=true;
-		interactive=false;
-	}
-
-	if(!is_output_set && !positional.empty()){
-		file_out.reset(new std::ofstream(positional.front()));
-		output=file_out.get();
-		if(!output->good()){
-			std::cout<<"Couldn't open "+positional.front()<<std::endl;
-			status=1;
-			return;
-		}
-		is_output_set=true;
-		positional.pop_front();
-	}
-
-	if(is_output_set && !is_input_set){
-		std::cout<<"An input must be specified if the output is specified"<<std::endl;
-		status=1;
-		return;
-	}
-}
-
-void Main::main_loop(){
-
-	int line_num=0;
-	while(input->good()){
-		if(status!=0){
-			break;
-		}
-		if(interactive)
-			print(" > ");
-
-		string line;
-		std::getline(*input,line);
-		if(std::regex_match(line,std::regex("\\s*"))){
-			line_num++;
-			continue;
-		}
-
-		try{
-			consume_line(line);
-			if(interactive)
-				endl();
-		}
-		catch(SyntaxError err){
-			if(!interactive){
-				error(std::to_string(line_num)+"\t"+line);
-			}
-			error(err.what());
-			endl();
-		}
-		catch(ExprError err){
-			if(!interactive){
-				error(std::to_string(line_num)+"\t"+line);
-			}
-			error(err.what());
-			error(to_string(err.subject));
-			endl();
-		}
-		catch(std::runtime_error err){
-			if(!interactive){
-				error(std::to_string(line_num)+"\t"+line);
-			}
-			error(err.what());
-			endl();
-		}
-
-		line_num++;
-	}
-}
-
-void Main::print(string str){
-	*output<<str;
-}
-void Main::error(string str){
-	*output<<str<<std::endl;
-}
-void Main::endl(){
-	*output<<std::endl;
+	// Create kernel instance and start it
+	xeus::xkernel kernel(config, xeus::get_user_name(), std::move(context), std::move(mptr), xeus::make_xserver_default);
+	kernel.start();
+	return 0;
 }
 
 void Main::consume_line(string line){
@@ -178,12 +38,12 @@ void Main::consume_line(string line){
 			comm.fptr(*this,rex_results[2].str());
 		}
 		else{
-			throw std::runtime_error("Unknown command: "+rex_results[1].str());
+			throw SyntaxError("Unknown command: "+rex_results[1].str());
 		}
 	}
 	else if(std::regex_match(line,rex_results,declare_rex)){
 		if(std::regex_match(rex_results[2].str(),empty_rex)){
-			throw std::runtime_error("Expected an expression after ':'");
+			throw SyntaxError("Expected an expression after ':'");
 		}
 		else{
 			string name = rex_results[1];
@@ -192,10 +52,117 @@ void Main::consume_line(string line){
 				workspace.erase(name);
 			workspace.emplace(name,expr);
 			if(echo_vars)
-				print(name+":\t"+to_string(expr));endl();
+				output<<(name+":\t"+to_string(expr))<<endl;
 		}
 	}
 	else{
-		throw std::runtime_error("Not a declaration or a command");
+		throw SyntaxError("Not a declaration or a command: '"+line+"'");
 	}
+}
+
+void Main::configure_impl() {
+
+}
+
+void Main::execute_request_impl(xeus::xrequest_context request_context, send_reply_callback cb, int execution_counter, const std::string& code, xeus::execute_request_config , nl::json ) {
+
+	static const std::regex line_rex(".*");
+	std::sregex_iterator line_iter(code.begin(),code.end(),line_rex);
+	while(line_iter!=std::sregex_iterator()){
+		if(std::regex_match(line_iter->str(),std::regex("\\s*"))){
+			line_iter++;
+			continue;
+		}
+
+		bool was_error = false;
+		string error_name;
+		string error_msg;
+		try{
+			consume_line(line_iter->str());
+		}
+		catch(SyntaxError err){
+			was_error=true;
+			error_name="SyntaxError";
+			error_msg=err.what();
+		}
+		catch(ExprError err){
+			was_error=true;
+			error_name="ExprError";
+			error_msg=to_string(err.subject)+"\n"+err.what();
+		}
+
+		string out = output.str();
+		output.str("");
+		if(was_error){
+			publish_execution_error(request_context, error_name, error_msg, {});
+		}
+		else{
+			nl::json pub_data;
+			pub_data["text/plain"] = out;
+			publish_execution_result(request_context, execution_counter, std::move(pub_data), nl::json::object());
+		}
+		line_iter++;
+	}
+	cb(xeus::create_successful_reply());
+}
+
+nl::json Main::complete_request_impl(const std::string& code, int cursor_pos) {
+
+	string target=code;
+	target.insert(cursor_pos,"\x1F");
+	static const std::regex cursor_word_rex("\\b\\S*?\\x1F\\S*?\\b");
+	std::smatch rex_results;
+	if(std::regex_search(target,rex_results,cursor_word_rex)){
+		string hovered = rex_results.str();
+		int cloc = hovered.find("\x1F");
+		hovered.erase(cloc,1);
+		if(!hovered.empty()){
+			std::vector<string> candidates;
+			for(const std::pair<string,Expr>& named_expr : workspace){
+				if(named_expr.first.size()<=hovered.size())
+					continue;
+				if(named_expr.first.substr(0,hovered.size())==hovered)
+					candidates.push_back(named_expr.first);
+			}
+			return xeus::create_complete_reply(std::move(candidates),rex_results.position(),
+																				 rex_results.position()+rex_results.length());
+		}
+	}
+	return xeus::create_complete_reply({},cursor_pos,cursor_pos);
+}
+
+nl::json Main::inspect_request_impl(const std::string& code, int cursor_pos, int ) {
+	string target=code;
+	target.insert(cursor_pos,"\x1F");
+	static const std::regex cursor_word_rex("\\b\\S*?\\x1F\\S*?\\b");
+	std::smatch rex_results;
+	if(std::regex_search(target,rex_results,cursor_word_rex)){
+		string hovered = rex_results.str();
+		int cloc = hovered.find("\x1F");
+		hovered.erase(cloc,1);
+		if(workspace.contains(hovered)){
+			return xeus::create_inspect_reply(true,{"text/plain",to_string(workspace[hovered])});
+		}
+	}
+	return xeus::create_inspect_reply();
+}
+
+nl::json Main::is_complete_request_impl(const std::string& ) {
+	return xeus::create_is_complete_reply("complete");
+}
+
+nl::json Main::kernel_info_request_impl() {
+	return xeus::create_info_reply(
+		"",//protocol_version
+		"symbolic",//implementation
+		"0.0",//implementation_version
+		"symbolic",//language_name
+		"0.0",//language_version
+		"text/plain",//language_mimetype
+		".sym"//language_file_extension
+	);
+}
+
+void Main::shutdown_request_impl() {
+
 }

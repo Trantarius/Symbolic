@@ -220,11 +220,13 @@ string to_string(const Expr& expr){
 				target = "\x1F("+to_string(expr[2])+")";
 			else
 				target = "\x1F"+to_string(expr[2]);
+			__attribute__ ((fallthrough));
 		case Expr::Type::BINARY:
 			if(expr[1].type().pemdas>=expr.type().pemdas && expr[1].type().pemdas>=0)
 				target = "\x1F("+to_string(expr[1])+")" + target;
 			else
 				target = "\x1F"+to_string(expr[1]) + target;
+			__attribute__ ((fallthrough));
 		case Expr::Type::UNARY:
 			if(expr[0].type().pemdas>=expr.type().pemdas && expr[0].type().pemdas>=0)
 				target = "\x1F("+to_string(expr[0])+")" + target;

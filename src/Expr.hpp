@@ -63,7 +63,7 @@ public:
 
 	Expr()=default;
 	Expr(const Expr&)=default;
-	Expr(Expr&& ex):_children(std::move(ex._children)),_type(ex._type),_value(ex._value){
+	Expr(Expr&& ex):_type(ex._type),_children(std::move(ex._children)),_value(ex._value){
 		ex._type=&Undefined;
 	}
 	Expr(const Type& type);
@@ -82,9 +82,9 @@ public:
 		return *this;
 	};
 
-	Expr& operator[](long n);
-	const Expr& operator[](long n) const;
-	long child_count() const { return _children.size(); }
+	Expr& operator[](size_t n);
+	const Expr& operator[](size_t n) const;
+	size_t child_count() const { return _children.size(); }
 	void add_child(const Expr& expr);
 
 	class Iterator{
