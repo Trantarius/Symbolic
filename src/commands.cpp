@@ -103,39 +103,43 @@ void echo(Main& main, string args){
 
 Command echo_command("echo","[on|off]", "Toggles the printing of newly created named expressions.",echo);
 
-void _showtree(const Expr& expr, std::ostream& out, const string& prefix, const string& ext){
-	out<<prefix<<ext;
+void _showtree(const Expr& expr, std::ostream& out, const string& prefix, const string& ext, string prefix_override=""){
+	if(prefix_override=="")
+		out<<prefix<<ext;
+	else
+		out<<prefix_override<<ext;
 	if(expr.type().arity==NULLARY)
 		out<<to_string(expr)<<endl;
 	else
 		out<<expr.type().name<<endl;
 	string next_prefix=prefix;
-	if(ext=="├╴")
-		next_prefix+="│ ";
+	if(ext==" ├╴")
+		next_prefix+=" │ ";
 	else
-		next_prefix+="  ";
+		next_prefix+="   ";
 
 	for(size_t n=0;n<expr.child_count();n++){
 		if(n==expr.child_count()-1)
-			_showtree(expr[n],out,next_prefix,"╰╴");
+			_showtree(expr[n],out,next_prefix," ╰╴");
 		else
-			_showtree(expr[n],out,next_prefix,"├╴");
+			_showtree(expr[n],out,next_prefix," ├╴");
 	}
 }
 
 void showtree(Main& main, string args){
+	constexpr size_t indent = 4;
 	std::vector<string> argv = split_args(args);
 	if(argv.size()==0){
 		for(const std::pair<string,Expr>& named_expr : main.workspace){
-			main.output<<named_expr.first<<":\t";
-			_showtree(named_expr.second,main.output,"\t","");
+			main.output<<named_expr.first<<":";
+			_showtree(named_expr.second,main.output,string(indent+named_expr.first.size()+1-3,' '),"",string(indent,' '));
 		}
 	}
 	else{
 		for(const string& name : argv){
 			if(main.workspace.contains(name)){
-				main.output<<name<<":\t";
-				_showtree(main.workspace[name],main.output,"\t","");
+				main.output<<name<<":";
+				_showtree(main.workspace[name],main.output,string(indent+name.size()+1-3,' '),"",string(indent,' '));
 			}
 			else{
 				main.output<<"There is no expression named '"<<name<<"'"<<endl;

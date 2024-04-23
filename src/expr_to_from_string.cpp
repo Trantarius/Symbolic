@@ -1,6 +1,5 @@
 #include "Expr.hpp"
 #include <boost/regex.hpp>
-#include <iostream>
 
 struct _ExprToFromStringImpl{
 	inline static const boost::regex empty_rex{"\\s*"};
@@ -19,25 +18,18 @@ struct _ExprToFromStringImpl{
 
 Expr _ExprToFromStringImpl::parse_string(const string& str, const string& original, size_t position){
 	Expr ret;
-	std::cout<<"Parsing '"<<str<<"'"<<std::endl;
 
 	if(boost::regex_match(str,empty_rex))
 		throw ExprError(Expr(),__FILE__ ": " + std::to_string(__LINE__));
 
 	for(const Expr::Type* exprtype : Expr::Type::all_known_types){
 		boost::regex rex = boost::regex(rex_header+exprtype->parser,boost::regex_constants::mod_x);
-		std::cout<<"Trying '"<<exprtype->parser<<"'"<<std::endl;
 		boost::smatch results;
 		if(boost::regex_match(str,results,rex)){
-			std::cout<<"Matched "<<exprtype->name<<std::endl;
-			for(int n=0;n<results.size();n++){
-				std::cout<<"Result "<<std::to_string(n)<<" is '"<<results.str(n)<<"'"<<std::endl;
-			}
 			ret._type=exprtype;
 			if(exprtype->arity!=NULLARY){
 				assert(results.size()==exprtype->arity+(rex_header_def_count+1UL) || exprtype->arity==INFINITARY);
 				for(size_t n=rex_header_def_count+1;n<results.size();n++){
-					std::cout<<"Dispatching "<<results.str(n)<<std::endl;
 					Expr child = parse_string(results[n],original,results.position(n)+position);
 					if(exprtype->arity==INFINITARY && child.type()==*exprtype){
 						while(!child._children.empty()){
