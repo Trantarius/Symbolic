@@ -5,6 +5,7 @@
 #include <xeus-zmq/xserver_zmq.hpp>
 #include <xeus-zmq/xzmq_context.hpp>
 #include <xeus/xhelper.hpp>
+#include <boost/regex.hpp>
 
 int main (int argc, char **argv){
 
@@ -26,24 +27,24 @@ int main (int argc, char **argv){
 
 void Main::consume_line(string line){
 
-	static const std::regex command_rex("\\s*\\$\\s*(\\w+)(?:\\s+(.*))?");
-	static const std::regex declare_rex("\\s*(\\w+)\\s*:\\s*(.*)");
-	static const std::regex empty_rex("\\s*");
+	static const boost::regex command_rex("\\s*\\$\\s*(\\w+)(?:\\s+(.*))?");
+	static const boost::regex declare_rex("\\s*(\\w+)\\s*:\\s*(.*)");
+	static const boost::regex empty_rex("\\s*");
 
-	std::smatch rex_results;
+	boost::smatch rex_results;
 
-	if(std::regex_match(line,rex_results,command_rex)){
+	if(boost::regex_match(line,rex_results,command_rex)){
 		if(Command::all.contains(rex_results[1])){
 			Command& comm = Command::all[rex_results[1]];
 			comm.fptr(*this,rex_results[2].str());
 		}
 		else{
-			throw SyntaxError("Unknown command: "+rex_results[1].str());
+			throw CommandUsageError("Unknown command: "+rex_results[1].str());
 		}
 	}
-	else if(std::regex_match(line,rex_results,declare_rex)){
-		if(std::regex_match(rex_results[2].str(),empty_rex)){
-			throw SyntaxError("Expected an expression after ':'");
+	else if(boost::regex_match(line,rex_results,declare_rex)){
+		if(boost::regex_match(rex_results[2].str(),empty_rex)){
+			throw CommandUsageError("Expected an expression after ':'");
 		}
 		else{
 			string name = rex_results[1];
@@ -56,7 +57,7 @@ void Main::consume_line(string line){
 		}
 	}
 	else{
-		throw SyntaxError("Not a declaration or a command: '"+line+"'");
+		throw CommandUsageError("Not a declaration or a command: '"+line+"'");
 	}
 }
 
@@ -66,10 +67,10 @@ void Main::configure_impl() {
 
 void Main::execute_request_impl(xeus::xrequest_context request_context, send_reply_callback cb, int execution_counter, const std::string& code, xeus::execute_request_config , nl::json ) {
 
-	static const std::regex line_rex(".*");
-	std::sregex_iterator line_iter(code.begin(),code.end(),line_rex);
-	while(line_iter!=std::sregex_iterator()){
-		if(std::regex_match(line_iter->str(),std::regex("\\s*"))){
+	static const boost::regex line_rex("[^\\n\\r]*");
+	boost::sregex_iterator line_iter(code.begin(),code.end(),line_rex);
+	while(line_iter!=boost::sregex_iterator()){
+		if(boost::regex_match(line_iter->str(),boost::regex("\\s*"))){
 			line_iter++;
 			continue;
 		}
@@ -89,6 +90,11 @@ void Main::execute_request_impl(xeus::xrequest_context request_context, send_rep
 			was_error=true;
 			error_name="ExprError";
 			error_msg=to_string(err.subject)+"\n"+err.what();
+		}
+		catch(CommandUsageError err){
+			was_error=true;
+			error_name="CommandUsageError";
+			error_msg=err.what();
 		}
 
 		string out = output.str();
@@ -110,9 +116,9 @@ nl::json Main::complete_request_impl(const std::string& code, int cursor_pos) {
 
 	string target=code;
 	target.insert(cursor_pos,"\x1F");
-	static const std::regex cursor_word_rex("\\b\\S*?\\x1F\\S*?\\b");
-	std::smatch rex_results;
-	if(std::regex_search(target,rex_results,cursor_word_rex)){
+	static const boost::regex cursor_word_rex("\\b\\S*?\\x1F\\S*?\\b");
+	boost::smatch rex_results;
+	if(boost::regex_search(target,rex_results,cursor_word_rex)){
 		string hovered = rex_results.str();
 		int cloc = hovered.find("\x1F");
 		hovered.erase(cloc,1);
@@ -134,9 +140,9 @@ nl::json Main::complete_request_impl(const std::string& code, int cursor_pos) {
 nl::json Main::inspect_request_impl(const std::string& code, int cursor_pos, int ) {
 	string target=code;
 	target.insert(cursor_pos,"\x1F");
-	static const std::regex cursor_word_rex("\\b\\S*?\\x1F\\S*?\\b");
-	std::smatch rex_results;
-	if(std::regex_search(target,rex_results,cursor_word_rex)){
+	static const boost::regex cursor_word_rex("\\b\\S*?\\x1F\\S*?\\b");
+	boost::smatch rex_results;
+	if(boost::regex_search(target,rex_results,cursor_word_rex)){
 		string hovered = rex_results.str();
 		int cloc = hovered.find("\x1F");
 		hovered.erase(cloc,1);

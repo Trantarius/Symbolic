@@ -8,44 +8,14 @@ Expr Expr::Type::operator()(const std::initializer_list<Expr>& il) const{
 }
 
 Expr::Expr(const Type& type):_type(&type){
-	switch(_type->arity){
-		case Type::NULLARY:
-		case Type::INFINITARY:
-			break;
-		case Type::UNARY:
-			_children = std::deque<Expr>({Expr()});
-			break;
-		case Type::BINARY:
-			_children = std::deque<Expr>({Expr(),Expr()});
-			break;
-		case Type::TERNARY:
-			_children = std::deque<Expr>({Expr(),Expr(),Expr()});
-			break;
+	if(type.arity!=INFINITARY){
+		_children.resize(type.arity);
 	}
 }
 
 Expr::Expr(const Type& type, const std::initializer_list<Expr>& il):_type(&type){
-	switch(_type->arity){
-		case Type::NULLARY:
-			if(il.size()!=0)
-				throw ExprError(Expr(type),"cannot give children to a nullary expr");
-			break;
-		case Type::INFINITARY:
-			break;
-		case Type::UNARY:
-			if(il.size()!=1)
-				throw ExprError(Expr(type),"cannot give "+std::to_string(il.size())+" children to a unary expr");
-			break;
-		case Type::BINARY:
-			if(il.size()!=2)
-				throw ExprError(Expr(type),"cannot give "+std::to_string(il.size())+" children to a binary expr");
-			break;
-		case Type::TERNARY:
-			if(il.size()!=3)
-				throw ExprError(Expr(type),"cannot give "+std::to_string(il.size())+" children to a ternary expr");
-			break;
-	}
-
+	if(type.arity!=INFINITARY && il.size()!=type.arity)
+		throw ExprError(Expr(type),"an expr of type "+type.name+" must have exactly "+std::to_string(type.arity)+" children");
 	_children = std::deque<Expr>(il);
 }
 
@@ -63,8 +33,8 @@ const Expr& Expr::operator[](size_t n) const{
 }
 
 void Expr::add_child(const Expr& expr){
-	if(_type->arity!=Type::INFINITARY){
-		throw ExprError(*this,"cannot add a new child to a non-infinitary expr");
+	if(type().arity!=INFINITARY){
+		throw ExprError(*this,"an expr of type "+type().name+" must have exactly "+std::to_string(type().arity)+" children");
 	}
 	_children.push_back(expr);
 }

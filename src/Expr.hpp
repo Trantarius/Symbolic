@@ -4,14 +4,22 @@
 #include <deque>
 #include <unordered_map>
 #include <set>
-#include <regex>
+#include <cstdint>
+#include <vector>
+#include <stdexcept>
 
 using std::string;
 
+enum Arity:uint8_t{NULLARY=0,UNARY=1,BINARY=2,TERNARY=3,INFINITARY=UINT8_MAX};
+
 struct Expr {
+
+
+	uint64_t hash() const;
 
 	class Type{
 		inline static uint64_t last_id=0;
+		uint64_t id=last_id++ * 313 + 727;
 		struct cmp_types{
 			bool operator()(const Type* a, const Type* b) const {
 				return a->pemdas > b->pemdas;
@@ -19,39 +27,46 @@ struct Expr {
 		};
 	public:
 		inline static std::multiset<const Type*,cmp_types> all_known_types;
-		uint64_t id=last_id++ * 313 + 727;
 		string name;
-		std::regex parser;
+
+		// regex to match for parsing; ((?&EXPR)) is a special marker for any sub expression
+		string parser;
+
+		// regex replace format for printing
 		string printer;
-		std::vector<string> operators;
-		enum Arity{NULLARY,UNARY,BINARY,TERNARY,INFINITARY};
+
+		// required number of children (exact); INFINITARY for any amount
 		Arity arity;
+
+		//enum Arity{NULLARY,UNARY,BINARY,TERNARY,INFINITARY};
+		//Arity arity;
+
 		// determines parsing order and if parentheses are needed for to_string
 		// <0 disables parentheses
 		int pemdas;
+
 		Type()=delete;
 		Type(const Type&)=delete;
-		Type(string name, string parser, string printer, std::initializer_list<string> operators,
-				 Arity arity, int pemdas): name(name), parser(parser), printer(printer),
-				 operators(operators), arity(arity),pemdas(pemdas){
+		Type(string name, string parser, string printer, Arity arity, int pemdas): name(name), parser(parser), printer(printer), arity(arity), pemdas(pemdas){
 				all_known_types.insert(this);
 			};
 		bool operator==(const Type& b) const { return id==b.id; }
 		bool operator!=(const Type& b) const { return id!=b.id; }
 		Expr operator()() const;
 		Expr operator()(const std::initializer_list<Expr>& il) const;
+		friend uint64_t Expr::hash() const;
 	};
 
-	inline static const Type List{"List", "(.*?),(.*)", "$1,$2", {","}, Type::INFINITARY,1000};
-	inline static const Type Add{"Add", "(.*?)\\+(.*)", "$1+$2", {"+"}, Type::INFINITARY,60};
-	inline static const Type Sub{"Sub", "(.*?)-(.*)", "$1-$2", {"-"}, Type::BINARY,50};
-	inline static const Type Mul{"Mul", "(.*?)\\*(.*)", "$1*$2", {"*"}, Type::INFINITARY,40};
-	inline static const Type Div{"Div", "(.*?)/(.*)", "$1/$2", {"/"}, Type::BINARY,30};
-	inline static const Type Neg{"Neg", "\\s*-(.*)", "-$1", {"-"}, Type::UNARY,20};
-	inline static const Type Pow{"Pow", "(.*)\\^(.*)", "$1^$2", {"^"}, Type::BINARY,10};
-	inline static const Type Symbol{"Symbol", "\\s*(\\w+)\\s*", "", {}, Type::NULLARY,-10};
-	inline static const Type Number{"Number", "\\s*(\\d+)\\s*", "", {}, Type::NULLARY,-10};
-	inline static const Type Undefined{"Undefined", "", "∅", {},Type::NULLARY,-1000};
+	inline static const Type Add{"Add", R"(((?:(?&EXPR)\+)*(?&EXPR))\+((?&EXPR)))", "$1+$2", INFINITARY, 60};
+	inline static const Type Sub{"Sub",
+		R"(((?:(?&EXPR)\-)*(?&EXPR))(?<=[\w\)\]\}])\s*\-((?&EXPR)))", "$1-$2", BINARY, 50};
+	inline static const Type Mul{"Mul", R"(((?:(?&EXPR)\*)*(?&EXPR))\*((?&EXPR)))", "$1*$2", INFINITARY, 40};
+	inline static const Type Div{"Div", R"(((?:(?&EXPR)/)*(?&EXPR))/((?&EXPR)))", "$1/$2", BINARY, 30};
+	inline static const Type Neg{"Neg", "-((?&EXPR))", "-$1", UNARY, 20};
+	inline static const Type Pow{"Pow", R"(((?&EXPR))\^((?&EXPR)(?:\^(?&EXPR))*))", "$1^$2", BINARY, 10};
+	inline static const Type Symbol{"Symbol", R"(\s*([a-zA-Z_]+)\s*)", "", NULLARY, -10};
+	inline static const Type Number{"Number", R"(\s*([0-9]+)\s*)", "", NULLARY, -10};
+	inline static const Type Undefined{"Undefined", "", "∅", NULLARY, -1000};
 
 private:
 	inline static std::vector<string> symbol_names;
@@ -68,10 +83,9 @@ public:
 	}
 	Expr(const Type& type);
 	Expr(const Type& type, const std::initializer_list<Expr>& il);
-	Expr(string str);
+	Expr(const string& str);
 
 	const Type& type() const {return *_type; }
-	uint64_t hash() const;
 	bool is_identical(const Expr& epxr) const;
 
 	Expr& operator=(const Expr&)=default;
@@ -128,8 +142,8 @@ public:
 	ConstIterator begin() const { return ConstIterator(this,0); }
 	ConstIterator end() const { return ConstIterator(this,_children.size()); }
 
-	friend bool string_to_expr_type(string str, const std::vector<string>& bracketed, const Expr::Type& type, Expr& out);
 	friend string to_string(const Expr& expr);
+	friend class _ExprToFromStringImpl;
 };
 
 
@@ -146,17 +160,10 @@ struct ExprError : public std::runtime_error{
 };
 
 struct SyntaxError : public std::runtime_error{
-	using std::runtime_error::runtime_error;
+	string problem;
+	string original;
+	size_t position;
+	SyntaxError(const string& problem, const string& original, size_t position):
+		std::runtime_error("'"+problem+"'\n"+original+"\n"+string(position,' ')+"^here"),
+		problem(problem), original(original), position(position) {}
 };
-struct MissingOperand : public SyntaxError{
-protected:
-	MissingOperand(string which, string oper):SyntaxError("missing "+which+" operand for "+oper){}
-public:
-	MissingOperand(string oper):SyntaxError("missing operand for "+oper){}
-};
-struct MissingLeftOperand : public MissingOperand{
-	MissingLeftOperand(string oper):MissingOperand("left",oper){} };
-struct MissingCenterOperand : public MissingOperand{
-	MissingCenterOperand(string oper):MissingOperand("center",oper){} };
-struct MissingRightOperand : public MissingOperand{
-	MissingRightOperand(string oper):MissingOperand("right",oper){} };

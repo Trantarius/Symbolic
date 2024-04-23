@@ -34,6 +34,8 @@ set(xeus-zmq_REQUIRED_VERSION 1.0.2)
 
 find_package(xeus-zmq ${xeus-zmq_REQUIRED_VERSION} REQUIRED)
 find_package(Threads)
+find_package(Boost REQUIRED COMPONENTS regex)
+include_directories(${BOOST_INCLUDEDIR})
 
 # Target and link
 # ===============
@@ -42,7 +44,7 @@ file(GLOB_RECURSE SOURCES src/**.cpp)
 
 # My kernel executable
 add_executable(${EXECUTABLE_NAME} ${SOURCES} )
-target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${xeus-zmq_target} Threads::Threads)
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${xeus-zmq_target} Threads::Threads ${BOOST_REGEX_LIBRARY})
 
 set_target_properties(${EXECUTABLE_NAME} PROPERTIES
     INSTALL_RPATH_USE_LINK_PATH TRUE

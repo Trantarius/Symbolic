@@ -19,15 +19,19 @@ struct Command{
 	string desc;
 	void (*fptr)(Main&,string);
 	Command()=default;
-	Command(string name, string args, string desc):name(name),args(args),desc(desc){
+	Command(string name, string args, string desc,void(*fptr)(Main&,string)):name(name),args(args),desc(desc),fptr(fptr){
 		all.emplace(name,*this);
 	}
+};
+
+struct CommandUsageError : public std::runtime_error{
+	using std::runtime_error::runtime_error;
 };
 
 struct Main : public xeus::xinterpreter{
 
 	std::ostringstream output;
-	std::unordered_map<string,Expr> workspace;
+	std::map<string,Expr> workspace;
 	bool echo_vars = true;
 	void consume_line(string line);
 
