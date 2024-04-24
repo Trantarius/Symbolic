@@ -1,20 +1,13 @@
 #include "Expr.hpp"
 
-Expr Expr::Type::operator()() const{
-	return Expr{*this};
-}
-Expr Expr::Type::operator()(const std::initializer_list<Expr>& il) const{
-	return Expr{*this,il};
-}
-
 Expr::Expr(const Type& type):_type(&type){
-	if(type.arity!=INFINITARY){
+	if(type.arity!=Type::INFINITARY){
 		_children.resize(type.arity);
 	}
 }
 
 Expr::Expr(const Type& type, const std::initializer_list<Expr>& il):_type(&type){
-	if(type.arity!=INFINITARY && il.size()!=type.arity)
+	if(type.arity!=Type::INFINITARY && il.size()!=type.arity)
 		throw ExprError(Expr(type),"an expr of type "+type.name+" must have exactly "+std::to_string(type.arity)+" children");
 	_children = std::deque<Expr>(il);
 }
@@ -33,7 +26,7 @@ const Expr& Expr::operator[](size_t n) const{
 }
 
 void Expr::add_child(const Expr& expr){
-	if(type().arity!=INFINITARY){
+	if(type().arity!=Type::INFINITARY){
 		throw ExprError(*this,"an expr of type "+type().name+" must have exactly "+std::to_string(type().arity)+" children");
 	}
 	_children.push_back(expr);

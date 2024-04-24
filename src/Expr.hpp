@@ -10,7 +10,7 @@
 
 using std::string;
 
-enum Arity:uint8_t{NULLARY=0,UNARY=1,BINARY=2,TERNARY=3,INFINITARY=UINT8_MAX};
+
 
 struct Expr {
 
@@ -36,6 +36,7 @@ struct Expr {
 		string printer;
 
 		// required number of children (exact); INFINITARY for any amount
+		enum Arity:uint8_t{NULLARY=0,UNARY=1,BINARY=2,TERNARY=3,INFINITARY=UINT8_MAX};
 		Arity arity;
 
 		//enum Arity{NULLARY,UNARY,BINARY,TERNARY,INFINITARY};
@@ -52,41 +53,31 @@ struct Expr {
 			};
 		bool operator==(const Type& b) const { return id==b.id; }
 		bool operator!=(const Type& b) const { return id!=b.id; }
-		Expr operator()() const;
-		Expr operator()(const std::initializer_list<Expr>& il) const;
 		friend uint64_t Expr::hash() const;
 	};
 
-	inline static const Type Add{"Add", R"(((?:(?&EXPR)\+)*(?&EXPR))\+((?&EXPR)))", "$1+$2", INFINITARY, 60};
-	inline static const Type Sub{"Sub",
-		R"(((?:(?&EXPR)\-)*(?&EXPR))(?<=[\w\)\]\}])\s*\-((?&EXPR)))", "$1-$2", BINARY, 50};
-	inline static const Type Mul{"Mul", R"(((?:(?&EXPR)\*)*(?&EXPR))\*((?&EXPR)))", "$1*$2", INFINITARY, 40};
-	inline static const Type Div{"Div", R"(((?:(?&EXPR)/)*(?&EXPR))/((?&EXPR)))", "$1/$2", BINARY, 30};
-	inline static const Type Neg{"Neg", "-((?&EXPR))", "-$1", UNARY, 20};
-	inline static const Type Pow{"Pow", R"(((?&EXPR))\^((?&EXPR)(?:\^(?&EXPR))*))", "$1^$2", BINARY, 10};
-	inline static const Type Symbol{"Symbol", R"(\s*([a-zA-Z_]+)\s*)", "", NULLARY, -10};
-	inline static const Type Number{"Number", R"(\s*([0-9]+)\s*)", "", NULLARY, -10};
-	inline static const Type Undefined{"Undefined", "", "∅", NULLARY, -1000};
+	inline static const Type _Undefined{"Undefined", "", "∅", Type::NULLARY, -1000};
 
 private:
 	inline static std::vector<string> symbol_names;
 	inline static std::unordered_map<string,long> symbol_ids;
-	const Type* _type = &Undefined;
+	const Type* _type = &_Undefined;
 	std::deque<Expr> _children;
 	int64_t _value=0;
+
+	Expr(const Type& type);
+	Expr(const Type& type, const std::initializer_list<Expr>& il);
 public:
 
 	Expr()=default;
 	Expr(const Expr&)=default;
 	Expr(Expr&& ex):_type(ex._type),_children(std::move(ex._children)),_value(ex._value){
-		ex._type=&Undefined;
+		ex._type=&_Undefined;
 	}
-	Expr(const Type& type);
-	Expr(const Type& type, const std::initializer_list<Expr>& il);
 	Expr(const string& str);
 
 	const Type& type() const {return *_type; }
-	bool is_identical(const Expr& epxr) const;
+	bool is_identical(const Expr& expr) const;
 
 	Expr& operator=(const Expr&)=default;
 	Expr& operator=(Expr&& b) {
@@ -95,6 +86,7 @@ public:
 		_value = b._value;
 		return *this;
 	};
+	bool operator==(const Expr& expr) const{ return is_identical(expr); }
 
 	Expr& operator[](size_t n);
 	const Expr& operator[](size_t n) const;
@@ -142,28 +134,133 @@ public:
 	ConstIterator begin() const { return ConstIterator(this,0); }
 	ConstIterator end() const { return ConstIterator(this,_children.size()); }
 
-	friend string to_string(const Expr& expr);
 	friend class _ExprToFromStringImpl;
+	friend class InfinitaryExprType;
+	friend class TernaryExprType;
+	friend class BinaryExprType;
+	friend class UnaryExprType;
+	friend class NullaryExprType;
+	friend class SymbolExprType;
+	friend class NumberExprType;
+
+	friend string to_string(const Expr& expr);
 };
 
+struct InfinitaryExprType : public Expr::Type{
+	InfinitaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
+		Expr::Type(name,parser,printer,INFINITARY,pemdas){}
 
+	template<typename...Ts> requires (std::same_as<Expr,Ts>&&...)
+	Expr operator()(Ts...args) const{
+		return Expr{*this,{std::move(args)...}};
+	}
+};
+
+struct TernaryExprType : public Expr::Type{
+	TernaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
+		Expr::Type(name,parser,printer,TERNARY,pemdas){}
+
+	Expr operator()() const {
+		return Expr(*this);
+	}
+	Expr operator()(Expr a,Expr b,Expr c) const{
+		return Expr(*this,{std::move(a),std::move(b),std::move(c)});
+	}
+};
+
+struct BinaryExprType : public Expr::Type{
+	BinaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
+		Expr::Type(name,parser,printer,BINARY,pemdas){}
+
+	Expr operator()() const {
+		return Expr(*this);
+	}
+	Expr operator()(Expr a,Expr b) const{
+		return Expr(*this,{std::move(a),std::move(b)});
+	}
+};
+
+struct UnaryExprType : public Expr::Type{
+	UnaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
+		Expr::Type(name,parser,printer,UNARY,pemdas){}
+
+	Expr operator()() const {
+		return Expr(*this);
+	}
+	Expr operator()(Expr a) const{
+		return Expr{*this,{std::move(a)}};
+	}
+};
+
+struct NullaryExprType : public Expr::Type{
+	NullaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
+		Expr::Type(name,parser,printer,NULLARY,pemdas){}
+
+	Expr operator()() const {
+		return Expr(*this);
+	}
+};
+
+struct SymbolExprType : public Expr::Type{
+	SymbolExprType(const string& name, const string& parser, const string& printer, int pemdas):
+		Expr::Type(name,parser,printer,NULLARY,pemdas){}
+
+	Expr operator()(const string& name) const {
+		Expr ret{*this};
+		if(Expr::symbol_ids.contains(name)){
+			ret._value=Expr::symbol_ids[name];
+		}
+		else{
+			ret._value=Expr::symbol_names.size();
+			Expr::symbol_names.push_back(name);
+			Expr::symbol_ids.emplace(name,ret._value);
+		}
+		return ret;
+	}
+};
+
+struct NumberExprType : public Expr::Type{
+	NumberExprType(const string& name, const string& parser, const string& printer, int pemdas):
+		Expr::Type(name,parser,printer,NULLARY,pemdas){}
+
+	Expr operator()(long num) const {
+		Expr ret{*this};
+		ret._value = num;
+		return ret;
+	}
+};
+
+inline const InfinitaryExprType List{"List", R"(((?&EXPR)),((?&EXPR)))", "$1, $2", 1000};
+inline const InfinitaryExprType Add{"Add", R"(((?&EXPR))\+((?&EXPR)))", "$1 + $2", 60};
+inline const BinaryExprType Sub{"Sub",
+	R"(((?:(?&EXPR)\-)*(?&EXPR))(?<=[\w\)\]\}])\s*\-((?&EXPR)))", "$1 - $2", 50};
+inline const InfinitaryExprType Mul{"Mul", R"(((?&EXPR))\*((?&EXPR)))", "$1*$2", 40};
+inline const BinaryExprType Div{"Div", R"(((?:(?&EXPR)/)*(?&EXPR))/((?&EXPR)))", "$1/$2", 30};
+inline const UnaryExprType Neg{"Neg", R"(\s*-((?&EXPR)))", "-$1", 20};
+inline const BinaryExprType Pow{"Pow", R"(((?&EXPR))\^((?&EXPR)(?:\^(?&EXPR))*))", "$1^$2", 10};
+inline const SymbolExprType Symbol{"Symbol", R"(\s*([a-zA-Z_]+)\s*)", "", -10};
+inline const NumberExprType Number{"Number", R"(\s*([0-9]+)\s*)", "", -10};
+inline const Expr::Type& Undefined=Expr::_Undefined;
 
 string to_string(const Expr& expr);
 
 
-
-
-
-struct ExprError : public std::runtime_error{
-	Expr subject;
-	ExprError(const Expr& subject, string what):std::runtime_error(what),subject(subject){}
+struct NamedError : public std::runtime_error{
+	string name;
+	NamedError(const string& name, const string& what):std::runtime_error(what),name(name){}
 };
 
-struct SyntaxError : public std::runtime_error{
+struct ExprError : public NamedError{
+	Expr subject;
+	ExprError(Expr subject, string what):
+		NamedError("ExprError", what + "\nwith expression: "+to_string(subject)),subject(std::move(subject)){}
+};
+
+struct SyntaxError : public NamedError{
 	string problem;
 	string original;
 	size_t position;
-	SyntaxError(const string& problem, const string& original, size_t position):
-		std::runtime_error("'"+problem+"'\n"+original+"\n"+string(position,' ')+"^here"),
-		problem(problem), original(original), position(position) {}
+	SyntaxError(string problem, string original, size_t position):
+		NamedError("SyntaxError", "'"+problem+"'\n"+original+"\n"+string(position,' ')+"^here"),
+		problem(std::move(problem)), original(std::move(original)), position(position) {}
 };

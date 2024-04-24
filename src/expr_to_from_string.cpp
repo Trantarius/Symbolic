@@ -10,7 +10,7 @@ struct _ExprToFromStringImpl{
 	inline static const int rex_header_def_count = 2;
 
 	inline static const boost::regex parenthetical_rex = boost::regex(
-		rex_header + R"(\(((?&BAL))\))"
+		rex_header + R"(\s*\(((?&BAL))\)\s*)"
 	);
 
 	static Expr parse_string(const string& str, const string& original, size_t position);
@@ -27,11 +27,11 @@ Expr _ExprToFromStringImpl::parse_string(const string& str, const string& origin
 		boost::smatch results;
 		if(boost::regex_match(str,results,rex)){
 			ret._type=exprtype;
-			if(exprtype->arity!=NULLARY){
-				assert(results.size()==exprtype->arity+(rex_header_def_count+1UL) || exprtype->arity==INFINITARY);
+			if(exprtype->arity!=Expr::Type::NULLARY){
+				assert(results.size()==exprtype->arity+(rex_header_def_count+1UL) || exprtype->arity==Expr::Type::INFINITARY);
 				for(size_t n=rex_header_def_count+1;n<results.size();n++){
 					Expr child = parse_string(results[n],original,results.position(n)+position);
-					if(exprtype->arity==INFINITARY && child.type()==*exprtype){
+					if(exprtype->arity==Expr::Type::INFINITARY && child.type()==*exprtype){
 						while(!child._children.empty()){
 							ret._children.push_back(std::move(child._children.front()));
 							child._children.pop_front();
@@ -42,7 +42,7 @@ Expr _ExprToFromStringImpl::parse_string(const string& str, const string& origin
 					}
 				}
 			}
-			if(*exprtype==Expr::Symbol){
+			if(*exprtype==Symbol){
 				if(Expr::symbol_ids.contains(results[rex_header_def_count+1])){
 					ret._value=Expr::symbol_ids[results[rex_header_def_count+1]];
 				}
@@ -52,7 +52,7 @@ Expr _ExprToFromStringImpl::parse_string(const string& str, const string& origin
 					Expr::symbol_ids.emplace(results.str(rex_header_def_count+1),ret._value);
 				}
 			}
-			else if(*exprtype==Expr::Number){
+			else if(*exprtype==Number){
 				ret._value=std::stol(results[rex_header_def_count+1]);
 			}
 			return ret;
@@ -103,29 +103,29 @@ string infinitary_to_string(const Expr& expr){
 string to_string(const Expr& expr){
 	string target;
 	switch(expr.type().arity){
-		case NULLARY:
-			if(expr.type()==Expr::Symbol){
+		case Expr::Type::NULLARY:
+			if(expr.type()==Symbol){
 				return Expr::symbol_names[expr._value];
 			}
-			else if(expr.type()==Expr::Number){
+			else if(expr.type()==Number){
 				return std::to_string(expr._value);
 			}
 			return expr.type().printer;
-		case INFINITARY:
+		case Expr::Type::INFINITARY:
 			return infinitary_to_string(expr);
-		case TERNARY:
+		case Expr::Type::TERNARY:
 			if(expr[2].type().pemdas>=expr.type().pemdas && expr[2].type().pemdas>=0)
 				target = "\x1F("+to_string(expr[2])+")";
 			else
 				target = "\x1F"+to_string(expr[2]);
 			__attribute__ ((fallthrough));
-		case BINARY:
+		case Expr::Type::BINARY:
 			if(expr[1].type().pemdas>=expr.type().pemdas && expr[1].type().pemdas>=0)
 				target = "\x1F("+to_string(expr[1])+")" + target;
 			else
 				target = "\x1F"+to_string(expr[1]) + target;
 			__attribute__ ((fallthrough));
-		case UNARY:
+		case Expr::Type::UNARY:
 			if(expr[0].type().pemdas>=expr.type().pemdas && expr[0].type().pemdas>=0)
 				target = "\x1F("+to_string(expr[0])+")" + target;
 			else

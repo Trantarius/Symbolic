@@ -5,8 +5,14 @@ set(EXECUTABLE_NAME symbolic)
 set(CMAKE_EXPORT_COMPILE_COMMANDS true)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED true)
-set(CMAKE_CXX_FLAGS_DEBUG_INIT "-O0 -g3")
-set(CMAKE_CXX_FLAGS_RELEASE_INIT "-O3 -DNDEBUG")
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CMAKE_CXX_FLAGS "-O0 -g3")
+elseif(CMAKE_BUILD_TYPE STREQUAL "Test")
+    set(CMAKE_CXX_FLAGS "-O0 -g3 -DTEST_BUILD")
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_CXX_FLAGS "-O3 -g0 -DNDEBUG")
+endif()
 
 # Configuration
 # =============
@@ -35,12 +41,16 @@ set(xeus-zmq_REQUIRED_VERSION 1.0.2)
 find_package(xeus-zmq ${xeus-zmq_REQUIRED_VERSION} REQUIRED)
 find_package(Threads)
 find_package(Boost REQUIRED COMPONENTS regex)
-include_directories(${BOOST_INCLUDEDIR})
+include_directories(${BOOST_INCLUDEDIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # Target and link
 # ===============
 
-file(GLOB_RECURSE SOURCES src/**.cpp)
+if(CMAKE_BUILD_TYPE STREQUAL "Test")
+    file(GLOB_RECURSE SOURCES src/**.cpp tests/**.cpp)
+else()
+    file(GLOB_RECURSE SOURCES src/**.cpp)
+endif()
 
 # My kernel executable
 add_executable(${EXECUTABLE_NAME} ${SOURCES} )

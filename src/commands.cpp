@@ -15,8 +15,6 @@ std::vector<string> split_args(const string& str){
 	return ret;
 }
 
-namespace commands{
-
 void help(Main& main, string args){
 	boost::smatch rex_result;
 	if(boost::regex_match(args,empty_rex)){
@@ -85,7 +83,7 @@ Command delete_command("delete","[name...]","Deletes a named expression(s). If n
 void echo(Main& main, string args){
 	std::vector<string> argv = split_args(args);
 	if(args.size()>1)
-		throw CommandUsageError("Expected 'on' or 'off'");
+		throw CommandError("Expected 'on' or 'off'");
 	if(boost::regex_match(args,empty_rex)){
 		main.echo_vars = ! main.echo_vars;
 	}
@@ -97,7 +95,7 @@ void echo(Main& main, string args){
 		main.echo_vars=false;
 	}
 	else{
-		throw CommandUsageError("Expected 'on' or 'off'");
+		throw CommandError("Expected 'on' or 'off'");
 	}
 }
 
@@ -108,7 +106,7 @@ void _showtree(const Expr& expr, std::ostream& out, const string& prefix, const 
 		out<<prefix<<ext;
 	else
 		out<<prefix_override<<ext;
-	if(expr.type().arity==NULLARY)
+	if(expr.type().arity==Expr::Type::NULLARY)
 		out<<to_string(expr)<<endl;
 	else
 		out<<expr.type().name<<endl;
@@ -149,5 +147,3 @@ void showtree(Main& main, string args){
 }
 
 Command showtree_command("showtree","[name...]","Prints a named expression(s) as a tree. If no names are given, all named expressions are printed.",showtree);
-
-}

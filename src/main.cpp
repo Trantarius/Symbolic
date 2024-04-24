@@ -7,10 +7,34 @@
 #include <xeus/xhelper.hpp>
 #include <boost/regex.hpp>
 
+#ifdef TEST_BUILD
+#include "tests.hpp"
+
+int main(){
+	bool all_passed=true;
+	for(Test* test : Test::all_tests){
+		std::cout<<test->name;
+		std::cout.flush();
+		test->run();
+		if(test->status==Test::FAILED){
+			std::cout<<" failed: "<<test->fail_reason<<std::endl;
+			all_passed=false;
+		}else{
+			std::cout<<"\r"<<string(test->name.size(),' ')<<"\r";
+		}
+	}
+
+	if(all_passed){
+		std::cout<<"All "<<std::to_string(Test::all_tests.size())<<" tests passed"<<std::endl;
+	}
+}
+
+#else
+
 int main (int argc, char **argv){
 
 	if(argc<2){
-		std::cerr<<"Expected connection file path";
+		std::cerr<<"Expected connection file path"<<std::endl;
 		return 1;
 	}
 
@@ -24,6 +48,8 @@ int main (int argc, char **argv){
 	kernel.start();
 	return 0;
 }
+
+#endif
 
 void Main::consume_line(string line){
 
@@ -39,12 +65,12 @@ void Main::consume_line(string line){
 			comm.fptr(*this,rex_results[2].str());
 		}
 		else{
-			throw CommandUsageError("Unknown command: "+rex_results[1].str());
+			throw CommandError("Unknown command: "+rex_results[1].str());
 		}
 	}
 	else if(boost::regex_match(line,rex_results,declare_rex)){
 		if(boost::regex_match(rex_results[2].str(),empty_rex)){
-			throw CommandUsageError("Expected an expression after ':'");
+			throw CommandError("Expected an expression after ':'");
 		}
 		else{
 			string name = rex_results[1];
@@ -57,7 +83,7 @@ void Main::consume_line(string line){
 		}
 	}
 	else{
-		throw CommandUsageError("Not a declaration or a command: '"+line+"'");
+		throw CommandError("Not a declaration or a command: '"+line+"'");
 	}
 }
 
@@ -81,23 +107,18 @@ void Main::execute_request_impl(xeus::xrequest_context request_context, send_rep
 		try{
 			consume_line(line_iter->str());
 		}
-		catch(SyntaxError err){
+		catch(const NamedError& err){
 			was_error=true;
-			error_name="SyntaxError";
+			error_name=err.name;
 			error_msg=err.what();
 		}
-		catch(ExprError err){
+		catch(const std::runtime_error& err){
 			was_error=true;
-			error_name="ExprError";
-			error_msg=to_string(err.subject)+"\n"+err.what();
-		}
-		catch(CommandUsageError err){
-			was_error=true;
-			error_name="CommandUsageError";
+			error_name="std::runtime_error";
 			error_msg=err.what();
 		}
 
-		string out = output.str();
+		string out = std::move(output.str());
 		output.str("");
 		if(was_error){
 			publish_execution_error(request_context, error_name, error_msg, {});

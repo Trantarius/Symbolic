@@ -24,8 +24,8 @@ struct Command{
 	}
 };
 
-struct CommandUsageError : public std::runtime_error{
-	using std::runtime_error::runtime_error;
+struct CommandError : public NamedError{
+	CommandError(string what):NamedError("CommandError",std::move(what)){}
 };
 
 struct Main : public xeus::xinterpreter{
