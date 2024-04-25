@@ -13,25 +13,26 @@ struct _ExprToFromStringImpl{
 		rex_header + R"(\s*\(((?&BAL))\)\s*)"
 	);
 
-	static Expr parse_string(const string& str, const string& original, size_t position);
+	static Expr string_to_expr(const string& str, const string& original, size_t position);
 };
 
-Expr _ExprToFromStringImpl::parse_string(const string& str, const string& original, size_t position){
-	Expr ret;
+Expr _ExprToFromStringImpl::string_to_expr(const string& str, const string& original, size_t position){
 
 	if(boost::regex_match(str,empty_rex))
 		throw ExprError(Expr(),__FILE__ ": " + std::to_string(__LINE__));
 
-	for(const Expr::Type* exprtype : Expr::Type::all_known_types){
-		boost::regex rex = boost::regex(rex_header+exprtype->parser,boost::regex_constants::mod_x);
+	for(const Expr::Type* exprtype : Expr::Type::all_types){
+		boost::regex rex = boost::regex(rex_header+exprtype->parse_string,boost::regex_constants::mod_x);
 		boost::smatch results;
 		if(boost::regex_match(str,results,rex)){
+			Expr ret;
 			ret._type=exprtype;
 			if(exprtype->arity!=Expr::Type::NULLARY){
 				assert(results.size()==exprtype->arity+(rex_header_def_count+1UL) || exprtype->arity==Expr::Type::INFINITARY);
 				for(size_t n=rex_header_def_count+1;n<results.size();n++){
-					Expr child = parse_string(results[n],original,results.position(n)+position);
-					if(exprtype->arity==Expr::Type::INFINITARY && child.type()==*exprtype){
+					Expr child = string_to_expr(results[n],original,results.position(n)+position);
+					if(exprtype->is_associative() && child.type()==*exprtype ||
+						 exprtype->is_list_unwrapper() && child.type()==List){
 						while(!child._children.empty()){
 							ret._children.push_back(std::move(child._children.front()));
 							child._children.pop_front();
@@ -61,7 +62,7 @@ Expr _ExprToFromStringImpl::parse_string(const string& str, const string& origin
 
 	boost::smatch result;
 	if(boost::regex_match(str, result, parenthetical_rex)){
-		return parse_string(result.str(rex_header_def_count+1),original,
+		return string_to_expr(result.str(rex_header_def_count+1),original,
 												position+result.position(rex_header_def_count+1));
 	}
 
@@ -69,7 +70,7 @@ Expr _ExprToFromStringImpl::parse_string(const string& str, const string& origin
 }
 
 Expr::Expr(const string& str){
-	*this = _ExprToFromStringImpl::parse_string(str,str,0);
+	*this = _ExprToFromStringImpl::string_to_expr(str,str,0);
 }
 
 
@@ -93,7 +94,7 @@ string infinitary_to_string(const Expr& expr){
 		child_strings.pop_back();
 		target = "\x1F" + child_strings.back() + target;
 		child_strings.pop_back();
-		string repl = boost::regex_replace(target,replacer_rex,expr.type().printer);
+		string repl = boost::regex_replace(target,replacer_rex,expr.type().print_string);
 		child_strings.push_back(repl);
 	}
 
@@ -110,7 +111,7 @@ string to_string(const Expr& expr){
 			else if(expr.type()==Number){
 				return std::to_string(expr._value);
 			}
-			return expr.type().printer;
+			return expr.type().print_string;
 		case Expr::Type::INFINITARY:
 			return infinitary_to_string(expr);
 		case Expr::Type::TERNARY:
@@ -134,6 +135,6 @@ string to_string(const Expr& expr){
 	}
 
 	static const boost::regex replacer_rex("\\x1F([^\\x1F\\x1E]*)(?:\\x1F([^\\x1F\\x1E]*))?(?:\\x1F([^\\x1F\\x1E]*))?\\x1E");
-	return boost::regex_replace(target,replacer_rex,expr.type().printer);
+	return boost::regex_replace(target,replacer_rex,expr.type().print_string);
 }
 

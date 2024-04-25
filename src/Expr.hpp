@@ -14,51 +14,86 @@ using std::string;
 
 struct Expr {
 
-
 	uint64_t hash() const;
 
 	class Type{
-		inline static uint64_t last_id=0;
-		uint64_t id=last_id++ * 313 + 727;
 		struct cmp_types{
 			bool operator()(const Type* a, const Type* b) const {
 				return a->pemdas > b->pemdas;
 			}
 		};
+		inline static uint8_t _fc = 0;
 	public:
-		inline static std::multiset<const Type*,cmp_types> all_known_types;
+		inline static std::multiset<const Type*,cmp_types> all_types;
 		string name;
 
 		// regex to match for parsing; ((?&EXPR)) is a special marker for any sub expression
-		string parser;
+		string parse_string;
 
 		// regex replace format for printing
-		string printer;
+		string print_string;
 
 		// required number of children (exact); INFINITARY for any amount
 		enum Arity:uint8_t{NULLARY=0,UNARY=1,BINARY=2,TERNARY=3,INFINITARY=UINT8_MAX};
 		Arity arity;
 
-		//enum Arity{NULLARY,UNARY,BINARY,TERNARY,INFINITARY};
-		//Arity arity;
-
 		// determines parsing order and if parentheses are needed for to_string
 		// <0 disables parentheses
 		int pemdas;
 
-		Type()=delete;
+		typedef uint16_t flags_t;
+		flags_t flags;
+
+		// if it can be performed (e.g. Add, Mul, cosine, etc. but not List, Symbol, etc.)
+		inline static const flags_t OPERATOR = 1<<(_fc++);
+		bool is_operator() const { return flags&OPERATOR; }
+
+		// if it contains a comma-seperated list. a List child will be unnested into this during parsing.
+		inline static const flags_t LIST_UNWRAPPER = 1<<(_fc++);
+		bool is_list_unwrapper() const { return flags&LIST_UNWRAPPER; }
+
+		// if this type uses the _value property of Expr
+		inline static const flags_t USES_VALUE = 1<<(_fc++);
+		bool uses_value() const { return flags&USES_VALUE; }
+
+		// if this represents a collection of values, like a vector or set
+		inline static const flags_t COLLECTION = 1<<(_fc++);
+		bool is_collection() const { return flags&COLLECTION; }
+
+		// is a known value, such as a number, pi, i, etc.
+		inline static const flags_t CONSTANT = 1<<(_fc++);
+		bool is_constant() const { return flags&CONSTANT; }
+
+		// if order of children is meaningless
+		inline static const flags_t COMMUTATIVE = 1<<(_fc++);
+		bool is_commutative() const { return flags&COMMUTATIVE; }
+
+		//if children of the same type can be unnested into this (this should be infinitary)
+		inline static const flags_t ASSOCIATIVE = 1<<(_fc++);
+		bool is_associative() const { return flags&ASSOCIATIVE; }
+
+		// if it can be applied to a collection on a per-element basis (exact behavior depends on the collection)
+		inline static const flags_t ENTRYWISE = 1<<(_fc++);
+		bool is_entrywise() const { return flags&ASSOCIATIVE; }
+
+		// represents a relationship b/w children. if it's an operator, it will return a bool
+		inline static const flags_t RELATIONSHIP = 1<<(_fc++);
+		bool is_relationship() const { return flags&RELATIONSHIP; }
+
+		// if boolean values are used for input and output
+		inline static const flags_t BOOLEAN = 1<<(_fc++);
+		bool is_boolean() const { return flags&BOOLEAN; }
+
+		Type()=default;
 		Type(const Type&)=delete;
-		Type(string name, string parser, string printer, Arity arity, int pemdas): name(name), parser(parser), printer(printer), arity(arity), pemdas(pemdas){
-				all_known_types.insert(this);
-			};
-		bool operator==(const Type& b) const { return id==b.id; }
-		bool operator!=(const Type& b) const { return id!=b.id; }
+		bool operator==(const Type& b) const { return this==&b; }
+		bool operator!=(const Type& b) const { return this!=&b; }
 		friend uint64_t Expr::hash() const;
 	};
 
-	inline static const Type _Undefined{"Undefined", "", "∅", Type::NULLARY, -1000};
-
 private:
+	static const Type& _Undefined;//{"Undefined", "", "∅", Type::NULLARY, -1000, 0};
+
 	inline static std::vector<string> symbol_names;
 	inline static std::unordered_map<string,long> symbol_ids;
 	const Type* _type = &_Undefined;
@@ -77,7 +112,8 @@ public:
 	Expr(const string& str);
 
 	const Type& type() const {return *_type; }
-	bool is_identical(const Expr& expr) const;
+	int64_t value() const { return _value; }
+	bool is_identical_to(const Expr& expr) const;
 
 	Expr& operator=(const Expr&)=default;
 	Expr& operator=(Expr&& b) {
@@ -86,7 +122,7 @@ public:
 		_value = b._value;
 		return *this;
 	};
-	bool operator==(const Expr& expr) const{ return is_identical(expr); }
+	bool operator==(const Expr& expr) const{ return is_identical_to(expr); }
 
 	Expr& operator[](size_t n);
 	const Expr& operator[](size_t n) const;
@@ -144,11 +180,18 @@ public:
 	friend class NumberExprType;
 
 	friend string to_string(const Expr& expr);
+	friend string symbol_printer(const Expr& ex);
+	friend string number_printer(const Expr& ex);
+};
+
+template<>
+struct std::hash<Expr>{
+	uint64_t operator ()(const Expr& ex) const {
+		return ex.hash();
+	}
 };
 
 struct InfinitaryExprType : public Expr::Type{
-	InfinitaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
-		Expr::Type(name,parser,printer,INFINITARY,pemdas){}
 
 	template<typename...Ts> requires (std::same_as<Expr,Ts>&&...)
 	Expr operator()(Ts...args) const{
@@ -157,8 +200,6 @@ struct InfinitaryExprType : public Expr::Type{
 };
 
 struct TernaryExprType : public Expr::Type{
-	TernaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
-		Expr::Type(name,parser,printer,TERNARY,pemdas){}
 
 	Expr operator()() const {
 		return Expr(*this);
@@ -169,8 +210,6 @@ struct TernaryExprType : public Expr::Type{
 };
 
 struct BinaryExprType : public Expr::Type{
-	BinaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
-		Expr::Type(name,parser,printer,BINARY,pemdas){}
 
 	Expr operator()() const {
 		return Expr(*this);
@@ -181,8 +220,6 @@ struct BinaryExprType : public Expr::Type{
 };
 
 struct UnaryExprType : public Expr::Type{
-	UnaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
-		Expr::Type(name,parser,printer,UNARY,pemdas){}
 
 	Expr operator()() const {
 		return Expr(*this);
@@ -193,8 +230,6 @@ struct UnaryExprType : public Expr::Type{
 };
 
 struct NullaryExprType : public Expr::Type{
-	NullaryExprType(const string& name, const string& parser, const string& printer, int pemdas):
-		Expr::Type(name,parser,printer,NULLARY,pemdas){}
 
 	Expr operator()() const {
 		return Expr(*this);
@@ -202,8 +237,6 @@ struct NullaryExprType : public Expr::Type{
 };
 
 struct SymbolExprType : public Expr::Type{
-	SymbolExprType(const string& name, const string& parser, const string& printer, int pemdas):
-		Expr::Type(name,parser,printer,NULLARY,pemdas){}
 
 	Expr operator()(const string& name) const {
 		Expr ret{*this};
@@ -220,8 +253,6 @@ struct SymbolExprType : public Expr::Type{
 };
 
 struct NumberExprType : public Expr::Type{
-	NumberExprType(const string& name, const string& parser, const string& printer, int pemdas):
-		Expr::Type(name,parser,printer,NULLARY,pemdas){}
 
 	Expr operator()(long num) const {
 		Expr ret{*this};
@@ -230,19 +261,62 @@ struct NumberExprType : public Expr::Type{
 	}
 };
 
-inline const InfinitaryExprType List{"List", R"(((?&EXPR)),((?&EXPR)))", "$1, $2", 1000};
-inline const InfinitaryExprType Add{"Add", R"(((?&EXPR))\+((?&EXPR)))", "$1 + $2", 60};
-inline const BinaryExprType Sub{"Sub",
-	R"(((?:(?&EXPR)\-)*(?&EXPR))(?<=[\w\)\]\}])\s*\-((?&EXPR)))", "$1 - $2", 50};
-inline const InfinitaryExprType Mul{"Mul", R"(((?&EXPR))\*((?&EXPR)))", "$1*$2", 40};
-inline const BinaryExprType Div{"Div", R"(((?:(?&EXPR)/)*(?&EXPR))/((?&EXPR)))", "$1/$2", 30};
-inline const UnaryExprType Neg{"Neg", R"(\s*-((?&EXPR)))", "-$1", 20};
-inline const BinaryExprType Pow{"Pow", R"(((?&EXPR))\^((?&EXPR)(?:\^(?&EXPR))*))", "$1^$2", 10};
-inline const SymbolExprType Symbol{"Symbol", R"(\s*([a-zA-Z_]+)\s*)", "", -10};
-inline const NumberExprType Number{"Number", R"(\s*([0-9]+)\s*)", "", -10};
-inline const Expr::Type& Undefined=Expr::_Undefined;
+
+// any comma seperated list. means nothing until a type with flag LIST_UNWRAPPER unwraps it.
+extern const InfinitaryExprType& List;
+
+// TODO
+extern const TernaryExprType& IfElse;
+extern const TernaryExprType& ForIn;
+
+// TODO
+extern const BinaryExprType& And;
+extern const BinaryExprType& Or;
+extern const UnaryExprType& Not;
+
+// TODO
+extern const BinaryExprType& Equal;
+extern const BinaryExprType& NotEqual;
+extern const BinaryExprType& Less;
+extern const BinaryExprType& Greater;
+extern const BinaryExprType& LessEqual;
+extern const BinaryExprType& GreaterEqual;
+
+extern const InfinitaryExprType& Add;
+extern const BinaryExprType& Sub;
+extern const InfinitaryExprType& Mul;
+extern const BinaryExprType& Div;
+extern const UnaryExprType& Neg;
+extern const BinaryExprType& Pow;
+
+// TODO
+extern const InfinitaryExprType& Vector;
+extern const InfinitaryExprType& Set;
+extern const InfinitaryExprType& Tuple;
+
+// TODO
+extern const UnaryExprType& Sin;
+extern const UnaryExprType& Cos;
+extern const UnaryExprType& Tan;
+extern const UnaryExprType& ASin;
+extern const UnaryExprType& ACos;
+extern const UnaryExprType& ATan;
+extern const UnaryExprType& SinH;
+extern const UnaryExprType& CosH;
+extern const UnaryExprType& TanH;
+
+// TODO
+extern const NullaryExprType& Pi;
+extern const NullaryExprType& Euler;
+extern const NullaryExprType& Imaginary;
+
+extern const SymbolExprType& Symbol;
+extern const NumberExprType& Number;
+
+extern const Expr::Type& Undefined;
 
 string to_string(const Expr& expr);
+
 
 
 struct NamedError : public std::runtime_error{
