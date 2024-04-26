@@ -2,19 +2,25 @@
 
 #include <string>
 #include <deque>
-#include <unordered_map>
 #include <set>
 #include <cstdint>
-#include <vector>
 #include <stdexcept>
+
+#include "FuzzyBool.hpp"
 
 using std::string;
 
+// type used to store all other value types
+typedef uint64_t uni_value_t;
+typedef int64_t int_value_t;
+typedef double float_value_t;
+typedef FuzzyBool bool_value_t;
 
+typedef uint64_t hash_t;
 
 struct Expr {
 
-	uint64_t hash() const;
+	hash_t hash() const;
 
 	class Type{
 		struct cmp_types{
@@ -22,12 +28,12 @@ struct Expr {
 				return a->pemdas > b->pemdas;
 			}
 		};
-		inline static uint8_t _fc = 0;
 	public:
 		inline static std::multiset<const Type*,cmp_types> all_types;
 		string name;
 
-		// regex to match for parsing; ((?&EXPR)) is a special marker for any sub expression
+		// regex to match for parsing; ((?&EXPR)) is a special marker for any sub expression;
+		// should always accept possible whitespace to either side
 		string parse_string;
 
 		// regex replace format for printing
@@ -41,64 +47,103 @@ struct Expr {
 		// <0 disables parentheses
 		int pemdas;
 
-		typedef uint16_t flags_t;
+		typedef uint64_t flags_t;
 		flags_t flags;
 
-		// if it can be performed (e.g. Add, Mul, cosine, etc. but not List, Symbol, etc.)
-		inline static const flags_t OPERATOR = 1<<(_fc++);
-		bool is_operator() const { return flags&OPERATOR; }
+	private:
+		static constexpr int _fcstart = __COUNTER__+1;
+#define NEXT (__COUNTER__-_fcstart)
+	public:
 
 		// if it contains a comma-seperated list. a List child will be unnested into this during parsing.
-		inline static const flags_t LIST_UNWRAPPER = 1<<(_fc++);
+		constexpr static const flags_t LIST_UNWRAPPER = 1<<NEXT;
 		bool is_list_unwrapper() const { return flags&LIST_UNWRAPPER; }
 
 		// if this type uses the _value property of Expr
-		inline static const flags_t USES_VALUE = 1<<(_fc++);
-		bool uses_value() const { return flags&USES_VALUE; }
-
-		// if this represents a collection of values, like a vector or set
-		inline static const flags_t COLLECTION = 1<<(_fc++);
-		bool is_collection() const { return flags&COLLECTION; }
+		constexpr static const flags_t VALUE_TYPE = 1<<NEXT;
+		bool is_value_type() const { return flags&VALUE_TYPE; }
 
 		// is a known value, such as a number, pi, i, etc.
-		inline static const flags_t CONSTANT = 1<<(_fc++);
+		constexpr static const flags_t CONSTANT = 1<<NEXT;
 		bool is_constant() const { return flags&CONSTANT; }
 
+		// if this is a collection like a vector or set
+		constexpr static const flags_t COLLECTION = 1<<NEXT;
+		bool is_collection() const { return flags&COLLECTION; }
+
 		// if order of children is meaningless
-		inline static const flags_t COMMUTATIVE = 1<<(_fc++);
+		constexpr static const flags_t COMMUTATIVE = 1<<NEXT;
 		bool is_commutative() const { return flags&COMMUTATIVE; }
 
 		//if children of the same type can be unnested into this (this should be infinitary)
-		inline static const flags_t ASSOCIATIVE = 1<<(_fc++);
+		constexpr static const flags_t ASSOCIATIVE = 1<<NEXT;
 		bool is_associative() const { return flags&ASSOCIATIVE; }
 
-		// if it can be applied to a collection on a per-element basis (exact behavior depends on the collection)
-		inline static const flags_t ENTRYWISE = 1<<(_fc++);
+		// if it can be applied to a collection on a per-element basis
+		// (exact behavior depends on the collection)
+		constexpr static const flags_t ENTRYWISE = 1<<NEXT;
 		bool is_entrywise() const { return flags&ASSOCIATIVE; }
+#undef NEXT
 
-		// represents a relationship b/w children. if it's an operator, it will return a bool
-		inline static const flags_t RELATIONSHIP = 1<<(_fc++);
-		bool is_relationship() const { return flags&RELATIONSHIP; }
+		// any of the following function pointers may be null if that operation is not supported
 
-		// if boolean values are used for input and output
-		inline static const flags_t BOOLEAN = 1<<(_fc++);
-		bool is_boolean() const { return flags&BOOLEAN; }
+		// custom parsing function; receives a string that matched its parse_string
+		typedef Expr (*f_parser_t)(const string&);
+		f_parser_t f_parser=nullptr;
+
+		// custom printing function
+		typedef string (*f_printer_t)(const Expr&);
+		f_printer_t f_printer=nullptr;
+
+		// determines if int-mode calculation is defined and fully accurate in this scenario
+		// assumed defined and accurate if function is nullptr
+		typedef bool (*f_is_int_calc_defined_t)(const Expr&, const std::deque<int_value_t>&);
+		f_is_int_calc_defined_t f_is_int_calc_defined = nullptr;
+
+		// calculation on integer values
+		typedef int_value_t (*f_int_calculate_t)(const Expr&, const std::deque<int_value_t>&);
+		f_int_calculate_t f_int_calculate = nullptr;
+
+		// determines if float-mode calculation is defined in this scenario
+		// assumed defined if function is nullptr
+		typedef bool (*f_is_float_calc_defined_t)(const Expr&, const std::deque<float_value_t>&);
+		f_is_float_calc_defined_t f_is_float_calc_defined = nullptr;
+
+		// calculation on float values
+		typedef float_value_t (*f_float_calculate_t)(const Expr&, const std::deque<float_value_t>&);
+		f_float_calculate_t f_float_calculate = nullptr;
+
+		// calculation on bool values
+		typedef bool_value_t (*f_bool_calculate_t)(const Expr&, const std::deque<bool_value_t>&);
+		f_bool_calculate_t f_bool_calculate = nullptr;
+
+		// relationship test b/w int values
+		typedef bool_value_t (*f_int_compare_t)(const Expr&, const std::deque<int_value_t>&);
+		f_int_compare_t f_int_compare = nullptr;
+
+		// relationship test b/w float values
+		typedef bool_value_t (*f_float_compare_t)(const Expr&, const std::deque<float_value_t>&);
+		f_float_compare_t f_float_compare = nullptr;
+
+		// relationship test b/w bool values
+		typedef bool_value_t (*f_bool_compare_t)(const Expr&, const std::deque<bool_value_t>&);
+		f_bool_compare_t f_bool_compare = nullptr;
 
 		Type()=default;
 		Type(const Type&)=delete;
+		Type(Type&&)=delete;
+		Type& operator=(const Type&)=delete;
+		Type& operator=(Type&&)=delete;
 		bool operator==(const Type& b) const { return this==&b; }
 		bool operator!=(const Type& b) const { return this!=&b; }
 		friend uint64_t Expr::hash() const;
 	};
 
 private:
-	static const Type& _Undefined;//{"Undefined", "", "∅", Type::NULLARY, -1000, 0};
-
-	inline static std::vector<string> symbol_names;
-	inline static std::unordered_map<string,long> symbol_ids;
+	static const Type& _Undefined;
 	const Type* _type = &_Undefined;
 	std::deque<Expr> _children;
-	int64_t _value=0;
+	uni_value_t _value=0;
 
 	Expr(const Type& type);
 	Expr(const Type& type, const std::initializer_list<Expr>& il);
@@ -112,7 +157,6 @@ public:
 	Expr(const string& str);
 
 	const Type& type() const {return *_type; }
-	int64_t value() const { return _value; }
 	bool is_identical_to(const Expr& expr) const;
 
 	Expr& operator=(const Expr&)=default;
@@ -131,8 +175,8 @@ public:
 
 	class Iterator{
 		Expr* owner = nullptr;
-		long child_idx = 0;
-		Iterator(Expr* owner, long child_idx): owner(owner), child_idx(child_idx) {}
+		size_t child_idx = 0;
+		Iterator(Expr* owner, size_t child_idx): owner(owner), child_idx(child_idx) {}
 	public:
 		Iterator()=default;
 		Iterator(const Iterator&)=default;
@@ -149,8 +193,8 @@ public:
 
 	class ConstIterator{
 		const Expr* owner = nullptr;
-		long child_idx = 0;
-		ConstIterator(const Expr* owner, long child_idx): owner(owner), child_idx(child_idx) {}
+		size_t child_idx = 0;
+		ConstIterator(const Expr* owner, size_t child_idx): owner(owner), child_idx(child_idx) {}
 	public:
 		ConstIterator()=default;
 		ConstIterator(const ConstIterator&)=default;
@@ -176,22 +220,45 @@ public:
 	friend class BinaryExprType;
 	friend class UnaryExprType;
 	friend class NullaryExprType;
-	friend class SymbolExprType;
-	friend class NumberExprType;
+	template<typename T>
+	friend class ValueExprType;
 
-	friend string to_string(const Expr& expr);
-	friend string symbol_printer(const Expr& ex);
-	friend string number_printer(const Expr& ex);
 };
+
+string to_string(const Expr& expr);
+
+struct NamedError : public std::runtime_error{
+	string name;
+	NamedError(const string& name, const string& what):std::runtime_error(what),name(name){}
+};
+
+struct ExprError : public NamedError{
+	Expr subject;
+	ExprError(Expr subject, string what):
+		NamedError("ExprError", what + "\nwith expression: "+to_string(subject)),subject(std::move(subject)){}
+};
+
+struct SyntaxError : public NamedError{
+	string problem;
+	string original;
+	size_t position;
+	SyntaxError(string problem, string original, size_t position):
+		NamedError("SyntaxError", "'"+problem+"'\n"+original+"\n"+string(position,' ')+"^here"),
+		problem(std::move(problem)), original(std::move(original)), position(position) {}
+};
+
 
 template<>
 struct std::hash<Expr>{
-	uint64_t operator ()(const Expr& ex) const {
+	hash_t operator ()(const Expr& ex) const {
 		return ex.hash();
 	}
 };
 
 struct InfinitaryExprType : public Expr::Type{
+	InfinitaryExprType(){
+		arity = Expr::Type::INFINITARY;
+	}
 
 	template<typename...Ts> requires (std::same_as<Expr,Ts>&&...)
 	Expr operator()(Ts...args) const{
@@ -200,6 +267,9 @@ struct InfinitaryExprType : public Expr::Type{
 };
 
 struct TernaryExprType : public Expr::Type{
+	TernaryExprType(){
+		arity = Expr::Type::TERNARY;
+	}
 
 	Expr operator()() const {
 		return Expr(*this);
@@ -210,6 +280,9 @@ struct TernaryExprType : public Expr::Type{
 };
 
 struct BinaryExprType : public Expr::Type{
+	BinaryExprType(){
+		arity = Expr::Type::BINARY;
+	}
 
 	Expr operator()() const {
 		return Expr(*this);
@@ -220,6 +293,9 @@ struct BinaryExprType : public Expr::Type{
 };
 
 struct UnaryExprType : public Expr::Type{
+	UnaryExprType(){
+		arity = Expr::Type::UNARY;
+	}
 
 	Expr operator()() const {
 		return Expr(*this);
@@ -230,37 +306,39 @@ struct UnaryExprType : public Expr::Type{
 };
 
 struct NullaryExprType : public Expr::Type{
+	NullaryExprType(){
+		arity = Expr::Type::NULLARY;
+	}
 
 	Expr operator()() const {
 		return Expr(*this);
 	}
 };
 
-struct SymbolExprType : public Expr::Type{
-
-	Expr operator()(const string& name) const {
+template<typename T> struct ValueExprType : public Expr::Type{
+private:
+	static uni_value_t store(T v);
+	static T retrieve(uni_value_t v);
+public:
+	ValueExprType(){
+		arity = Expr::Type::NULLARY;
+		flags |= Expr::Type::VALUE_TYPE;
+	}
+	Expr operator()(T v) const{
 		Expr ret{*this};
-		if(Expr::symbol_ids.contains(name)){
-			ret._value=Expr::symbol_ids[name];
-		}
-		else{
-			ret._value=Expr::symbol_names.size();
-			Expr::symbol_names.push_back(name);
-			Expr::symbol_ids.emplace(name,ret._value);
-		}
+		ret._value=store(v);
 		return ret;
 	}
-};
-
-struct NumberExprType : public Expr::Type{
-
-	Expr operator()(long num) const {
-		Expr ret{*this};
-		ret._value = num;
-		return ret;
+	T value(const Expr& ex) const{
+		if(ex.type()!=*this)
+			throw ExprError(ex,"can only use ValueExprType.value on an expr with that ValueExprType");
+		return retrieve(ex._value);
 	}
 };
-
+template struct ValueExprType<string>;
+template struct ValueExprType<int_value_t>;
+template struct ValueExprType<float_value_t>;
+template struct ValueExprType<bool_value_t>;
 
 // any comma seperated list. means nothing until a type with flag LIST_UNWRAPPER unwraps it.
 extern const InfinitaryExprType& List;
@@ -273,6 +351,9 @@ extern const TernaryExprType& ForIn;
 extern const BinaryExprType& And;
 extern const BinaryExprType& Or;
 extern const UnaryExprType& Not;
+
+// TODO
+extern const BinaryExprType& IsIn;
 
 // TODO
 extern const BinaryExprType& Equal;
@@ -306,35 +387,18 @@ extern const UnaryExprType& CosH;
 extern const UnaryExprType& TanH;
 
 // TODO
+extern const ValueExprType<bool_value_t>& Bool;
+
+// TODO
 extern const NullaryExprType& Pi;
 extern const NullaryExprType& Euler;
 extern const NullaryExprType& Imaginary;
 
-extern const SymbolExprType& Symbol;
-extern const NumberExprType& Number;
+extern const ValueExprType<string>& Symbol;
+extern const ValueExprType<int_value_t>& Integer;
+
+// TODO
+extern const ValueExprType<float_value_t>& Float;
 
 extern const Expr::Type& Undefined;
 
-string to_string(const Expr& expr);
-
-
-
-struct NamedError : public std::runtime_error{
-	string name;
-	NamedError(const string& name, const string& what):std::runtime_error(what),name(name){}
-};
-
-struct ExprError : public NamedError{
-	Expr subject;
-	ExprError(Expr subject, string what):
-		NamedError("ExprError", what + "\nwith expression: "+to_string(subject)),subject(std::move(subject)){}
-};
-
-struct SyntaxError : public NamedError{
-	string problem;
-	string original;
-	size_t position;
-	SyntaxError(string problem, string original, size_t position):
-		NamedError("SyntaxError", "'"+problem+"'\n"+original+"\n"+string(position,' ')+"^here"),
-		problem(std::move(problem)), original(std::move(original)), position(position) {}
-};

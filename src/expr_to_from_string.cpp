@@ -25,38 +25,35 @@ Expr _ExprToFromStringImpl::string_to_expr(const string& str, const string& orig
 		boost::regex rex = boost::regex(rex_header+exprtype->parse_string,boost::regex_constants::mod_x);
 		boost::smatch results;
 		if(boost::regex_match(str,results,rex)){
-			Expr ret;
-			ret._type=exprtype;
-			if(exprtype->arity!=Expr::Type::NULLARY){
-				assert(results.size()==exprtype->arity+(rex_header_def_count+1UL) || exprtype->arity==Expr::Type::INFINITARY);
-				for(size_t n=rex_header_def_count+1;n<results.size();n++){
-					Expr child = string_to_expr(results[n],original,results.position(n)+position);
-					if(exprtype->is_associative() && child.type()==*exprtype ||
-						 exprtype->is_list_unwrapper() && child.type()==List){
-						while(!child._children.empty()){
-							ret._children.push_back(std::move(child._children.front()));
-							child._children.pop_front();
+			if(exprtype->f_parser==nullptr){
+				Expr ret;
+				ret._type=exprtype;
+				if(exprtype->arity!=Expr::Type::NULLARY){
+					assert(results.size()==exprtype->arity+(rex_header_def_count+1UL) || exprtype->arity==Expr::Type::INFINITARY);
+					for(size_t n=rex_header_def_count+1;n<results.size();n++){
+						Expr child = string_to_expr(results[n],original,results.position(n)+position);
+						if(exprtype->is_associative() && child.type()==*exprtype ||
+							exprtype->is_list_unwrapper() && child.type()==List){
+							while(!child._children.empty()){
+								ret._children.push_back(std::move(child._children.front()));
+								child._children.pop_front();
+							}
+						}
+						else{
+							ret._children.push_back(std::move(child));
 						}
 					}
-					else{
-						ret._children.push_back(std::move(child));
-					}
+				}
+				return ret;
+			}
+			else{
+				try{
+					return exprtype->f_parser(results.str(0));
+				}
+				catch(SyntaxError err){
+					throw SyntaxError(err.problem, original, position + err.position);
 				}
 			}
-			if(*exprtype==Symbol){
-				if(Expr::symbol_ids.contains(results[rex_header_def_count+1])){
-					ret._value=Expr::symbol_ids[results[rex_header_def_count+1]];
-				}
-				else{
-					ret._value=Expr::symbol_names.size();
-					Expr::symbol_names.push_back(results[rex_header_def_count+1]);
-					Expr::symbol_ids.emplace(results.str(rex_header_def_count+1),ret._value);
-				}
-			}
-			else if(*exprtype==Number){
-				ret._value=std::stol(results[rex_header_def_count+1]);
-			}
-			return ret;
 		}
 	}
 
@@ -102,39 +99,38 @@ string infinitary_to_string(const Expr& expr){
 }
 
 string to_string(const Expr& expr){
-	string target;
-	switch(expr.type().arity){
-		case Expr::Type::NULLARY:
-			if(expr.type()==Symbol){
-				return Expr::symbol_names[expr._value];
-			}
-			else if(expr.type()==Number){
-				return std::to_string(expr._value);
-			}
-			return expr.type().print_string;
-		case Expr::Type::INFINITARY:
-			return infinitary_to_string(expr);
-		case Expr::Type::TERNARY:
-			if(expr[2].type().pemdas>=expr.type().pemdas && expr[2].type().pemdas>=0)
-				target = "\x1F("+to_string(expr[2])+")";
-			else
-				target = "\x1F"+to_string(expr[2]);
-			__attribute__ ((fallthrough));
-		case Expr::Type::BINARY:
-			if(expr[1].type().pemdas>=expr.type().pemdas && expr[1].type().pemdas>=0)
-				target = "\x1F("+to_string(expr[1])+")" + target;
-			else
-				target = "\x1F"+to_string(expr[1]) + target;
-			__attribute__ ((fallthrough));
-		case Expr::Type::UNARY:
-			if(expr[0].type().pemdas>=expr.type().pemdas && expr[0].type().pemdas>=0)
-				target = "\x1F("+to_string(expr[0])+")" + target;
-			else
-				target = "\x1F"+to_string(expr[0]) + target;
-			target += "\x1E";
+	if(expr.type().f_printer!=nullptr){
+		return expr.type().f_printer(expr);
 	}
+	else{
+		string target;
+		switch(expr.type().arity){
+			case Expr::Type::NULLARY:
+				return expr.type().print_string;
+			case Expr::Type::INFINITARY:
+				return infinitary_to_string(expr);
+			case Expr::Type::TERNARY:
+				if(expr[2].type().pemdas>=expr.type().pemdas && expr[2].type().pemdas>=0)
+					target = "\x1F("+to_string(expr[2])+")";
+				else
+					target = "\x1F"+to_string(expr[2]);
+				__attribute__ ((fallthrough));
+			case Expr::Type::BINARY:
+				if(expr[1].type().pemdas>=expr.type().pemdas && expr[1].type().pemdas>=0)
+					target = "\x1F("+to_string(expr[1])+")" + target;
+				else
+					target = "\x1F"+to_string(expr[1]) + target;
+				__attribute__ ((fallthrough));
+			case Expr::Type::UNARY:
+				if(expr[0].type().pemdas>=expr.type().pemdas && expr[0].type().pemdas>=0)
+					target = "\x1F("+to_string(expr[0])+")" + target;
+				else
+					target = "\x1F"+to_string(expr[0]) + target;
+				target += "\x1E";
+		}
 
-	static const boost::regex replacer_rex("\\x1F([^\\x1F\\x1E]*)(?:\\x1F([^\\x1F\\x1E]*))?(?:\\x1F([^\\x1F\\x1E]*))?\\x1E");
-	return boost::regex_replace(target,replacer_rex,expr.type().print_string);
+		static const boost::regex replacer_rex("\\x1F([^\\x1F\\x1E]*)(?:\\x1F([^\\x1F\\x1E]*))?(?:\\x1F([^\\x1F\\x1E]*))?\\x1E");
+		return boost::regex_replace(target,replacer_rex,expr.type().print_string);
+	}
 }
 

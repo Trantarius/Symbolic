@@ -49,8 +49,8 @@ void test_basic_operators(){
 
 	TEST("abcd",Symbol("abcd"));
 	TEST("  abcd  ",Symbol("abcd"));
-	TEST("1234",Number(1234));
-	TEST("  1234  ",Number(1234));
+	TEST("1234",Integer(1234));
+	TEST("  1234  ",Integer(1234));
 }
 const Test basic_op_test("basic operator string-to-expr",test_basic_operators);
 
