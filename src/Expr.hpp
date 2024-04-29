@@ -4,8 +4,8 @@
 #include <deque>
 #include <set>
 #include <cstdint>
-#include <stdexcept>
 
+#include "error.hpp"
 #include "FuzzyBool.hpp"
 
 using std::string;
@@ -75,7 +75,8 @@ struct Expr {
 		constexpr static const flags_t COMMUTATIVE = 1<<NEXT;
 		bool is_commutative() const { return flags&COMMUTATIVE; }
 
-		//if children of the same type can be unnested into this (this should be infinitary)
+		// if children of the same type can be unnested into this (this should be infinitary);
+		// also allows a sub-sequence of members to be calculated when not all members are known values
 		constexpr static const flags_t ASSOCIATIVE = 1<<NEXT;
 		bool is_associative() const { return flags&ASSOCIATIVE; }
 
@@ -95,39 +96,22 @@ struct Expr {
 		typedef string (*f_printer_t)(const Expr&);
 		f_printer_t f_printer=nullptr;
 
-		// determines if int-mode calculation is defined and fully accurate in this scenario
-		// assumed defined and accurate if function is nullptr
-		typedef bool (*f_is_int_calc_defined_t)(const Expr&, const std::deque<int_value_t>&);
-		f_is_int_calc_defined_t f_is_int_calc_defined = nullptr;
+		// non-recursively dissolve this expr (ie, do addition, resolve ifs, etc);
+		// returns self if not currently possible
+		typedef Expr (*f_perform_t)(const Expr&,bool allow_approx);
+		f_perform_t f_perform=nullptr;
 
-		// calculation on integer values
-		typedef int_value_t (*f_int_calculate_t)(const Expr&, const std::deque<int_value_t>&);
-		f_int_calculate_t f_int_calculate = nullptr;
+		// gets an int representation of this value (only for constants)
+		typedef int_value_t (*f_get_int_t)(const Expr&);
+		f_get_int_t f_get_int=nullptr;
 
-		// determines if float-mode calculation is defined in this scenario
-		// assumed defined if function is nullptr
-		typedef bool (*f_is_float_calc_defined_t)(const Expr&, const std::deque<float_value_t>&);
-		f_is_float_calc_defined_t f_is_float_calc_defined = nullptr;
+		// gets a float representation of this value (only for constants)
+		typedef float_value_t (*f_get_float_t)(const Expr&);
+		f_get_float_t f_get_float=nullptr;
 
-		// calculation on float values
-		typedef float_value_t (*f_float_calculate_t)(const Expr&, const std::deque<float_value_t>&);
-		f_float_calculate_t f_float_calculate = nullptr;
-
-		// calculation on bool values
-		typedef bool_value_t (*f_bool_calculate_t)(const Expr&, const std::deque<bool_value_t>&);
-		f_bool_calculate_t f_bool_calculate = nullptr;
-
-		// relationship test b/w int values
-		typedef bool_value_t (*f_int_compare_t)(const Expr&, const std::deque<int_value_t>&);
-		f_int_compare_t f_int_compare = nullptr;
-
-		// relationship test b/w float values
-		typedef bool_value_t (*f_float_compare_t)(const Expr&, const std::deque<float_value_t>&);
-		f_float_compare_t f_float_compare = nullptr;
-
-		// relationship test b/w bool values
-		typedef bool_value_t (*f_bool_compare_t)(const Expr&, const std::deque<bool_value_t>&);
-		f_bool_compare_t f_bool_compare = nullptr;
+		// gets a bool representation of this value (only for constants)
+		typedef bool_value_t (*f_get_bool_t)(const Expr&);
+		f_get_bool_t f_get_bool=nullptr;
 
 		Type()=default;
 		Type(const Type&)=delete;
@@ -136,6 +120,8 @@ struct Expr {
 		Type& operator=(Type&&)=delete;
 		bool operator==(const Type& b) const { return this==&b; }
 		bool operator!=(const Type& b) const { return this!=&b; }
+
+		virtual Expr operator()() const;
 		friend uint64_t Expr::hash() const;
 	};
 
@@ -145,8 +131,11 @@ private:
 	std::deque<Expr> _children;
 	uni_value_t _value=0;
 
-	Expr(const Type& type);
-	Expr(const Type& type, const std::initializer_list<Expr>& il);
+	//Expr(const Type& type);
+	//Expr(const Type& type, const std::initializer_list<Expr>& il);
+	// for Type to directly initialize an Expr
+	Expr(const Type* _t, std::deque<Expr>&& _c, uni_value_t _v):
+		_type(_t), _children(std::move(_c)), _value(_v) {}
 public:
 
 	Expr()=default;
@@ -155,6 +144,9 @@ public:
 		ex._type=&_Undefined;
 	}
 	Expr(const string& str);
+	Expr(int_value_t);
+	Expr(float_value_t);
+	Expr(bool_value_t);
 
 	const Type& type() const {return *_type; }
 	bool is_identical_to(const Expr& expr) const;
@@ -168,51 +160,60 @@ public:
 	};
 	bool operator==(const Expr& expr) const{ return is_identical_to(expr); }
 
+	class Iterator{
+		std::deque<Expr>::iterator iter;
+		Iterator(std::deque<Expr>::iterator it):iter(it){}
+	public:
+		Iterator()=default;
+		Iterator(const Iterator&)=default;
+		Iterator(Iterator&&)=default;
+		Iterator& operator=(const Iterator&)=default;
+		Iterator& operator=(Iterator&&)=default;
+		bool operator == (const Iterator& b) const { return iter==b.iter; }
+		bool operator != (const Iterator& b) const { return iter!=b.iter; }
+		Expr& operator * () const { return *iter; }
+		Expr* operator -> () const { return &*iter; }
+		Iterator& operator ++ () { ++iter; return *this; }
+		Iterator operator ++ (int) { return Iterator(iter++); }
+		Iterator& operator -- () { --iter; return *this; }
+		Iterator operator -- (int) { return Iterator(iter--); }
+		friend class Expr;
+		friend class ConstIterator;
+	};
+
+	class ConstIterator{
+		std::deque<Expr>::const_iterator iter;
+		ConstIterator(std::deque<Expr>::const_iterator it):iter(it){}
+	public:
+		ConstIterator()=default;
+		ConstIterator(const ConstIterator&)=default;
+		ConstIterator(ConstIterator&&)=default;
+		ConstIterator& operator=(const ConstIterator&)=default;
+		ConstIterator& operator=(ConstIterator&&)=default;
+		ConstIterator(const Iterator& i):iter(i.iter){}
+		ConstIterator(Iterator&& i):iter(std::move(i.iter)){}
+		bool operator == (const ConstIterator& b) const { return iter==b.iter; }
+		bool operator != (const ConstIterator& b) const { return iter!=b.iter; }
+		const Expr& operator * () const { return *iter; }
+		const Expr* operator -> () const { return &*iter; }
+		ConstIterator& operator ++ () { ++iter; return *this; }
+		ConstIterator operator ++ (int) { return ConstIterator(iter++); }
+		ConstIterator& operator -- () { --iter; return *this; }
+		ConstIterator operator -- (int) { return ConstIterator(iter--); }
+		friend class Expr;
+	};
+
+	Iterator begin() { return Iterator(_children.begin()); }
+	Iterator end() { return Iterator(_children.end()); }
+	ConstIterator begin() const { return ConstIterator(_children.begin()); }
+	ConstIterator end() const { return ConstIterator(_children.end()); }
+
 	Expr& operator[](size_t n);
 	const Expr& operator[](size_t n) const;
 	size_t child_count() const { return _children.size(); }
 	void add_child(const Expr& expr);
-
-	class Iterator{
-		Expr* owner = nullptr;
-		size_t child_idx = 0;
-		Iterator(Expr* owner, size_t child_idx): owner(owner), child_idx(child_idx) {}
-	public:
-		Iterator()=default;
-		Iterator(const Iterator&)=default;
-		bool operator == (const Iterator& b) const { return owner==b.owner && child_idx==b.child_idx; }
-		bool operator != (const Iterator& b) const { return !(*this==b); }
-		Expr& operator * () const { return owner->_children[child_idx]; }
-		Expr& operator -> () const { return owner->_children[child_idx]; }
-		Iterator& operator ++ () { ++child_idx; return *this; }
-		Iterator operator ++ (int) { return Iterator(owner,child_idx++); }
-		Iterator& operator -- () { --child_idx; return *this; }
-		Iterator operator -- (int) { return Iterator(owner,child_idx--); }
-		friend class Expr;
-	};
-
-	class ConstIterator{
-		const Expr* owner = nullptr;
-		size_t child_idx = 0;
-		ConstIterator(const Expr* owner, size_t child_idx): owner(owner), child_idx(child_idx) {}
-	public:
-		ConstIterator()=default;
-		ConstIterator(const ConstIterator&)=default;
-		bool operator == (const ConstIterator& b) const { return owner==b.owner && child_idx==b.child_idx; }
-		bool operator != (const ConstIterator& b) const { return !(*this==b); }
-		const Expr& operator * () const { return owner->_children[child_idx]; }
-		const Expr& operator -> () const { return owner->_children[child_idx]; }
-		ConstIterator& operator ++ () { ++child_idx; return *this; }
-		ConstIterator operator ++ (int) { return ConstIterator(owner,child_idx++); }
-		ConstIterator& operator -- () { --child_idx; return *this; }
-		ConstIterator operator -- (int) { return ConstIterator(owner,child_idx--); }
-		friend class Expr;
-	};
-
-	Iterator begin() { return Iterator(this,0); }
-	Iterator end() { return Iterator(this,_children.size()); }
-	ConstIterator begin() const { return ConstIterator(this,0); }
-	ConstIterator end() const { return ConstIterator(this,_children.size()); }
+	Iterator insert_child(const ConstIterator& pos, const Expr& expr);
+	Iterator remove_child(const ConstIterator& iter);
 
 	friend class _ExprToFromStringImpl;
 	friend class InfinitaryExprType;
@@ -226,11 +227,9 @@ public:
 };
 
 string to_string(const Expr& expr);
+inline string to_string(const Expr::Type& type){ return type.name; }
 
-struct NamedError : public std::runtime_error{
-	string name;
-	NamedError(const string& name, const string& what):std::runtime_error(what),name(name){}
-};
+
 
 struct ExprError : public NamedError{
 	Expr subject;
@@ -247,7 +246,6 @@ struct SyntaxError : public NamedError{
 		problem(std::move(problem)), original(std::move(original)), position(position) {}
 };
 
-
 template<>
 struct std::hash<Expr>{
 	hash_t operator ()(const Expr& ex) const {
@@ -262,7 +260,7 @@ struct InfinitaryExprType : public Expr::Type{
 
 	template<typename...Ts> requires (std::same_as<Expr,Ts>&&...)
 	Expr operator()(Ts...args) const{
-		return Expr{*this,{std::move(args)...}};
+		return Expr(this,{std::move(args)...},0);
 	}
 };
 
@@ -270,12 +268,8 @@ struct TernaryExprType : public Expr::Type{
 	TernaryExprType(){
 		arity = Expr::Type::TERNARY;
 	}
-
-	Expr operator()() const {
-		return Expr(*this);
-	}
 	Expr operator()(Expr a,Expr b,Expr c) const{
-		return Expr(*this,{std::move(a),std::move(b),std::move(c)});
+		return Expr(this,{std::move(a),std::move(b),std::move(c)},0);
 	}
 };
 
@@ -283,12 +277,8 @@ struct BinaryExprType : public Expr::Type{
 	BinaryExprType(){
 		arity = Expr::Type::BINARY;
 	}
-
-	Expr operator()() const {
-		return Expr(*this);
-	}
 	Expr operator()(Expr a,Expr b) const{
-		return Expr(*this,{std::move(a),std::move(b)});
+		return Expr(this,{std::move(a),std::move(b)},0);
 	}
 };
 
@@ -296,22 +286,14 @@ struct UnaryExprType : public Expr::Type{
 	UnaryExprType(){
 		arity = Expr::Type::UNARY;
 	}
-
-	Expr operator()() const {
-		return Expr(*this);
-	}
 	Expr operator()(Expr a) const{
-		return Expr{*this,{std::move(a)}};
+		return Expr(this,{std::move(a)},0);
 	}
 };
 
 struct NullaryExprType : public Expr::Type{
 	NullaryExprType(){
 		arity = Expr::Type::NULLARY;
-	}
-
-	Expr operator()() const {
-		return Expr(*this);
 	}
 };
 
@@ -325,13 +307,10 @@ public:
 		flags |= Expr::Type::VALUE_TYPE;
 	}
 	Expr operator()(T v) const{
-		Expr ret{*this};
-		ret._value=store(v);
-		return ret;
+		return Expr(this, {}, store(v));
 	}
 	T value(const Expr& ex) const{
-		if(ex.type()!=*this)
-			throw ExprError(ex,"can only use ValueExprType.value on an expr with that ValueExprType");
+		ASSERT_EQUAL(ex.type(),*this);
 		return retrieve(ex._value);
 	}
 };
@@ -387,18 +366,14 @@ extern const UnaryExprType& CosH;
 extern const UnaryExprType& TanH;
 
 // TODO
-extern const ValueExprType<bool_value_t>& Bool;
-
-// TODO
 extern const NullaryExprType& Pi;
 extern const NullaryExprType& Euler;
 extern const NullaryExprType& Imaginary;
 
+extern const ValueExprType<bool_value_t>& Bool;
 extern const ValueExprType<string>& Symbol;
-extern const ValueExprType<int_value_t>& Integer;
-
-// TODO
 extern const ValueExprType<float_value_t>& Float;
+extern const ValueExprType<int_value_t>& Integer;
 
 extern const Expr::Type& Undefined;
 

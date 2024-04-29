@@ -3,16 +3,31 @@
 #include <cmath>
 #include <cfloat>
 
-Expr::Expr(const Type& type):_type(&type){
-	if(type.arity!=Type::INFINITARY){
-		_children.resize(type.arity);
+Expr Expr::Type::operator()() const {
+	switch(arity){
+		case NULLARY:
+			return Expr(this,std::deque<Expr>{},0);
+		case UNARY:
+			return Expr(this,std::deque<Expr>{Expr()},0);
+		case BINARY:
+			return Expr(this,std::deque<Expr>{Expr(),Expr()},0);
+		case TERNARY:
+			return Expr(this,std::deque<Expr>{Expr(),Expr(),Expr()},0);
+		case INFINITARY:
+			return Expr(this,std::deque<Expr>{},0);
+		default:
+			ERROR("should be unreachable");
 	}
 }
 
-Expr::Expr(const Type& type, const std::initializer_list<Expr>& il):_type(&type){
-	if(type.arity!=Type::INFINITARY && il.size()!=type.arity)
-		throw ExprError(Expr(type),"an expr of type "+type.name+" must have exactly "+std::to_string(type.arity)+" children");
-	_children = std::deque<Expr>(il);
+Expr::Expr(int_value_t v){
+	*this=Integer(v);
+}
+Expr::Expr(float_value_t v){
+	*this=Float(v);
+}
+Expr::Expr(bool_value_t v){
+	*this=Bool(v);
 }
 
 Expr& Expr::operator[](size_t n){
@@ -33,6 +48,20 @@ void Expr::add_child(const Expr& expr){
 		throw ExprError(*this,"an expr of type "+type().name+" must have exactly "+std::to_string(type().arity)+" children");
 	}
 	_children.push_back(expr);
+}
+
+Expr::Iterator Expr::insert_child(const ConstIterator& pos, const Expr& expr){
+	if(type().arity!=Type::INFINITARY){
+		throw ExprError(*this,"an expr of type "+type().name+" must have exactly "+std::to_string(type().arity)+" children");
+	}
+	return Iterator(_children.insert(pos.iter,expr));
+}
+
+Expr::Iterator Expr::remove_child(const ConstIterator& pos){
+	if(type().arity!=Type::INFINITARY){
+		throw ExprError(*this,"an expr of type "+type().name+" must have exactly "+std::to_string(type().arity)+" children");
+	}
+	return Iterator(_children.erase(pos.iter));
 }
 
 hash_t Expr::hash() const {
@@ -138,20 +167,36 @@ const InfinitaryExprType& make_list(){
 }
 const InfinitaryExprType& List = make_list();
 
-int_value_t add_int_calc(const Expr&,const std::deque<int_value_t>& args){
-	int_value_t sum=0;
-	for(int_value_t n : args){
-		sum+=n;
+template<typename RET,typename...ARGS>
+using FuncPtr = RET (*)(ARGS...);
+template<typename T, FuncPtr<T,const Expr&> Expr::Type::*F_GET>
+Expr add_perform_t(const Expr& ex){
+	T total = 0;
+	Expr ret = Add();
+	for(const Expr& child : ex){
+		if(child.type().*F_GET==nullptr){
+			ret.add_child(child);
+		}
+		else{
+			total += (child.type().*F_GET)(child);
+		}
 	}
-	return sum;
+	if(ret.child_count()==0){
+		return Expr(total);
+	}
+	else{
+		ret.add_child(Expr(total));
+		return ret;
+	}
 }
 
-float_value_t add_float_calc(const Expr&, const std::deque<float_value_t>& args){
-	float_value_t sum=0;
-	for(float_value_t n : args){
-		sum+=n;
+Expr add_perform(const Expr& ex, bool allow_approx){
+	ASSERT_EQUAL(ex.type(),Add);
+	if(allow_approx){
+		return add_perform_t<float_value_t,&Expr::Type::f_get_float>(ex);
+	}else{
+		return add_perform_t<int_value_t,&Expr::Type::f_get_int>(ex);
 	}
-	return sum;
 }
 
 const InfinitaryExprType& make_add(){
@@ -163,19 +208,28 @@ const InfinitaryExprType& make_add(){
 	type.pemdas = 60;
 	type.flags = Expr::Type::ASSOCIATIVE|
 							 Expr::Type::COMMUTATIVE|Expr::Type::ENTRYWISE;
-	type.f_int_calculate = add_int_calc;
-	type.f_float_calculate = add_float_calc;
+	type.f_perform = add_perform;
 	Expr::Type::all_types.insert(&type);
 	return type;
 }
 const InfinitaryExprType& Add = make_add();
 
-int_value_t sub_int_calc(const Expr&, const std::deque<int_value_t>& args){
-	return args[0]-args[1];
+template<typename T, FuncPtr<T,const Expr&> Expr::Type::*F_GET>
+Expr sub_perform_t(const Expr& ex){
+	if(ex[0].type().*F_GET==nullptr || ex[1].type().*F_GET==nullptr)
+		return ex;
+	T left = (ex[0].type().*F_GET)(ex[0]);
+	T right = (ex[1].type().*F_GET)(ex[1]);
+	return Expr(left-right);
 }
 
-float_value_t sub_float_calc(const Expr&, const std::deque<float_value_t>& args){
-	return args[0]-args[1];;
+Expr sub_perform(const Expr& ex, bool allow_approx){
+	ASSERT_EQUAL(ex.type(),Sub);
+	if(allow_approx){
+		return sub_perform_t<float_value_t, &Expr::Type::f_get_float>(ex);
+	}else{
+		return sub_perform_t<int_value_t, &Expr::Type::f_get_int>(ex);
+	}
 }
 
 const BinaryExprType& make_sub(){
@@ -186,27 +240,40 @@ const BinaryExprType& make_sub(){
 	type.arity = Expr::Type::BINARY;
 	type.pemdas = 50;
 	type.flags = Expr::Type::ENTRYWISE;
-	type.f_int_calculate = sub_int_calc;
-	type.f_float_calculate = sub_float_calc;
+	type.f_perform = sub_perform;
 	Expr::Type::all_types.insert(&type);
 	return type;
 }
 const BinaryExprType& Sub = make_sub();
 
-int_value_t mul_int_calc(const Expr&, const std::deque<int_value_t>& args){
-	int_value_t prod=0;
-	for(int_value_t n : args){
-		prod*=n;
+template<typename T, FuncPtr<T,const Expr&> Expr::Type::*F_GET>
+Expr mul_perform_t(const Expr& ex){
+	T total = 1;
+	Expr ret = Mul();
+	for(const Expr& child : ex){
+		if(child.type().*F_GET==nullptr){
+			ret.add_child(child);
+		}
+		else{
+			total *= (child.type().*F_GET)(child);
+		}
 	}
-	return prod;
+	if(ret.child_count()==0){
+		return Expr(total);
+	}
+	else{
+		ret.add_child(Expr(total));
+		return ret;
+	}
 }
 
-float_value_t mul_float_calc(const Expr&, const std::deque<float_value_t>& args){
-	float_value_t prod=0;
-	for(float_value_t n : args){
-		prod*=n;
+Expr mul_perform(const Expr& ex, bool allow_approx){
+	ASSERT_EQUAL(ex.type(),Mul);
+	if(allow_approx){
+		return mul_perform_t<float_value_t,&Expr::Type::f_get_float>(ex);
+	}else{
+		return mul_perform_t<int_value_t,&Expr::Type::f_get_int>(ex);
 	}
-	return prod;
 }
 
 const InfinitaryExprType& make_mul(){
@@ -218,27 +285,33 @@ const InfinitaryExprType& make_mul(){
 	type.pemdas = 40;
 	type.flags = Expr::Type::ASSOCIATIVE|Expr::Type::COMMUTATIVE|
 							 Expr::Type::ENTRYWISE;
-	type.f_int_calculate = mul_int_calc;
-	type.f_float_calculate = mul_float_calc;
+	type.f_perform = mul_perform;
 	Expr::Type::all_types.insert(&type);
 	return type;
 }
 const InfinitaryExprType& Mul = make_mul();
 
-int_value_t div_int_calc(const Expr&, const std::deque<int_value_t>& args){
-	return args[0]/args[1];
-}
-
-float_value_t div_float_calc(const Expr&, const std::deque<float_value_t>& args){
-	return args[0]/args[1];
-}
-
-bool div_is_int_calc_defined(const Expr&, const std::deque<int_value_t>& args){
-	return args[0] && !(args[0]%args[1]);
-}
-
-bool div_is_float_calc_defined(const Expr&, const std::deque<float_value_t>& args){
-	return fabs(args[0])>DBL_EPSILON;
+Expr div_perform(const Expr& ex, bool allow_approx){
+	ASSERT_EQUAL(ex.type(),Div);
+	if(allow_approx){
+		if(ex[0].type().f_get_float==nullptr || ex[1].type().f_get_float==nullptr)
+			return ex;
+		float_value_t left = (ex[0].type().f_get_float)(ex[0]);
+		float_value_t right = (ex[1].type().f_get_float)(ex[1]);
+		if(fabs(right)<DBL_EPSILON)
+			return Undefined();
+		return Expr(left/right);
+	}else{
+		if(ex[0].type().f_get_int==nullptr || ex[1].type().f_get_int==nullptr)
+			return ex;
+		int_value_t left = (ex[0].type().f_get_int)(ex[0]);
+		int_value_t right = (ex[1].type().f_get_int)(ex[1]);
+		if(right==0)
+			return Undefined();
+		if(left%right!=0)
+			return ex;
+		return Expr(left/right);
+	}
 }
 
 const BinaryExprType& make_div(){
@@ -249,21 +322,23 @@ const BinaryExprType& make_div(){
 	type.arity = Expr::Type::BINARY;
 	type.pemdas = 30;
 	type.flags = Expr::Type::ENTRYWISE;
-	type.f_int_calculate = div_int_calc;
-	type.f_float_calculate = div_float_calc;
-	type.f_is_int_calc_defined = div_is_int_calc_defined;
-	type.f_is_float_calc_defined = div_is_float_calc_defined;
+	type.f_perform = div_perform;
 	Expr::Type::all_types.insert(&type);
 	return type;
 }
 const BinaryExprType& Div = make_div();
 
-int_value_t neg_int_calc(const Expr&, const std::deque<int_value_t>& args){
-	return -args[0];
-}
-
-float_value_t neg_float_calc(const Expr&, const std::deque<float_value_t>& args){
-	return -args[0];
+Expr neg_perform(const Expr& ex, bool allow_approx){
+	ASSERT_EQUAL(ex.type(),Neg);
+	if(allow_approx){
+		if(ex[0].type().f_get_float==nullptr)
+			return ex;
+		return -(ex[0].type().f_get_float)(ex[0]);
+	}else{
+		if(ex[0].type().f_get_int==nullptr)
+			return ex;
+		return -(ex[0].type().f_get_int)(ex[0]);
+	}
 }
 
 const UnaryExprType& make_neg(){
@@ -274,25 +349,22 @@ const UnaryExprType& make_neg(){
 	type.arity = Expr::Type::UNARY;
 	type.pemdas = 20;
 	type.flags = Expr::Type::ENTRYWISE;
-	type.f_int_calculate = neg_int_calc;
-	type.f_float_calculate = neg_float_calc;
+	type.f_perform = neg_perform;
 	Expr::Type::all_types.insert(&type);
 	return type;
 }
 const UnaryExprType& Neg = make_neg();
 
-int_value_t pow_int_calc(const Expr&, const std::deque<int_value_t>& args){
-	switch(args[0]){
+int_value_t int_pow(int_value_t b,int_value_t p){
+	switch(b){
 		case 0:
-			return args[1]==0;
+			return p==0;
 		case -1:
-			return labs(args[1])%2 * 2 - 1;
+			return labs(p)%2 * 2 - 1;
 		case 1:
 			return 1;
 		default:
 			int_value_t i=1;
-			int_value_t b=args[0];
-			int_value_t p=args[1];
 			while (p) {
 				if (p & 1) {
 					i *= b;
@@ -304,16 +376,25 @@ int_value_t pow_int_calc(const Expr&, const std::deque<int_value_t>& args){
 	}
 }
 
-float_value_t pow_float_calc(const Expr&, const std::deque<float_value_t>& args){
-	return pow(args[0],args[1]);
-}
-
-bool pow_is_int_calc_defined(const Expr&, const std::deque<int_value_t>& args){
-	return args[1]>=0 || args[0]==1 || args[0]==0 || args[0]==-1;
-}
-
-bool pow_is_float_calc_defined(const Expr&, const std::deque<float_value_t>& args){
-	return args[0]>=0;
+Expr pow_perform(const Expr& ex, bool allow_approx){
+	ASSERT_EQUAL(ex.type(),Pow);
+	if(allow_approx){
+		if(ex[0].type().f_get_float==nullptr || ex[1].type().f_get_float==nullptr)
+			return ex;
+		float_value_t left = (ex[0].type().f_get_float)(ex[0]);
+		float_value_t right = (ex[1].type().f_get_float)(ex[1]);
+		if(left<0)
+			return Undefined();
+		return Expr(pow(left,right));
+	}else{
+		if(ex[0].type().f_get_int==nullptr || ex[1].type().f_get_int==nullptr)
+			return ex;
+		int_value_t left = (ex[0].type().f_get_int)(ex[0]);
+		int_value_t right = (ex[1].type().f_get_int)(ex[1]);
+		if(!(right>=0 || left==1 || left==0 || left==-1))
+			return ex;
+		return Expr(int_pow(left,right));
+	}
 }
 
 const BinaryExprType& make_pow(){
@@ -324,10 +405,7 @@ const BinaryExprType& make_pow(){
 	type.arity = Expr::Type::BINARY;
 	type.pemdas = 10;
 	type.flags = Expr::Type::ENTRYWISE;
-	type.f_int_calculate = pow_int_calc;
-	type.f_float_calculate = pow_float_calc;
-	type.f_is_int_calc_defined = pow_is_int_calc_defined;
-	type.f_is_float_calc_defined = pow_is_float_calc_defined;
+	type.f_perform = pow_perform;
 	Expr::Type::all_types.insert(&type);
 	return type;
 }
@@ -349,7 +427,7 @@ string symbol_printer(const Expr& ex){
 const ValueExprType<string>& make_symbol(){
 	static ValueExprType<string> type;
 	type.name = "Symbol";
-	type.parse_string = R"(\s*([a-zA-Z_]+)\s*)";
+	type.parse_string = R"(\s*\b[a-zA-Z_]+\b\s*)";
 	type.arity = Expr::Type::NULLARY;
 	type.pemdas = -10;
 	type.flags = Expr::Type::VALUE_TYPE;
@@ -359,6 +437,39 @@ const ValueExprType<string>& make_symbol(){
 	return type;
 }
 const ValueExprType<string>& Symbol = make_symbol();
+
+Expr float_parser(const string& str){
+	string trimmed;
+	for(char c : str){
+		if(c!=' ')
+			trimmed.push_back(c);
+	}
+	static_assert(std::same_as<float_value_t,double>);
+	return Float(std::stod(trimmed));
+}
+
+string float_printer(const Expr& ex){
+	return std::to_string(Float.value(ex));
+}
+
+float_value_t float_get_float(const Expr& ex){
+	return Float.value(ex);
+}
+
+const ValueExprType<float_value_t>& make_float(){
+	static ValueExprType<float_value_t> type;
+	type.name = "Float";
+	type.parse_string = R"(\s*\b[0-9]+\.[0-9]+\b\s*)";
+	type.arity = Expr::Type::NULLARY;
+	type.pemdas = -9;
+	type.flags = Expr::Type::VALUE_TYPE|Expr::Type::CONSTANT;
+	type.f_parser = float_parser;
+	type.f_printer = float_printer;
+	type.f_get_float = float_get_float;
+	Expr::Type::all_types.insert(&type);
+	return type;
+}
+const ValueExprType<float_value_t>& Float = make_float();
 
 Expr integer_parser(const string& str){
 	string trimmed;
@@ -373,26 +484,75 @@ string integer_printer(const Expr& ex){
 	return std::to_string(Integer.value(ex));
 }
 
-int_value_t integer_int_calc(const Expr& ex, const std::deque<int_value_t>&){
+int_value_t integer_get_int(const Expr& ex){
 	return Integer.value(ex);
 }
 
-float_value_t integer_float_calc(const Expr& ex, const std::deque<float_value_t>&){
+float_value_t integer_get_float(const Expr& ex){
 	return Integer.value(ex);
 }
 
 const ValueExprType<int_value_t>& make_integer(){
 	static ValueExprType<int_value_t> type;
 	type.name = "Integer";
-	type.parse_string = R"(\s*([0-9]+)\s*)";
+	type.parse_string = R"(\s*\b[0-9]+\b\s*)";
 	type.arity = Expr::Type::NULLARY;
 	type.pemdas = -10;
 	type.flags = Expr::Type::VALUE_TYPE|Expr::Type::CONSTANT;
 	type.f_parser = integer_parser;
 	type.f_printer = integer_printer;
-	type.f_int_calculate = integer_int_calc;
-	type.f_float_calculate = integer_float_calc;
+	type.f_get_int = integer_get_int;
+	type.f_get_float = integer_get_float;
 	Expr::Type::all_types.insert(&type);
 	return type;
 }
 const ValueExprType<int_value_t>& Integer = make_integer();
+
+
+Expr bool_parser(const string& str){
+	string trimmed;
+	for(char c : str){
+		if(c!=' ')
+			trimmed.push_back(c);
+	}
+	if(trimmed=="true"){
+		return Bool(TRUE);
+	}
+	else if(trimmed=="false"){
+		return Bool(FALSE);
+	}
+	else{
+		return Bool(MAYBE);
+	}
+}
+
+string bool_printer(const Expr& ex){
+	if(Bool.value(ex)==TRUE){
+		return "true";
+	}
+	else if(Bool.value(ex)==FALSE){
+		return "false";
+	}
+	else{
+		return "maybe";
+	}
+}
+
+bool_value_t bool_get_bool(const Expr& ex){
+	return Bool.value(ex);
+}
+
+const ValueExprType<bool_value_t>& make_bool(){
+	static ValueExprType<bool_value_t> type;
+	type.name = "Bool";
+	type.parse_string = R"(\s*\b(?:true|false|maybe)\b\s*)";
+	type.arity = Expr::Type::NULLARY;
+	type.pemdas = -9;
+	type.flags = Expr::Type::VALUE_TYPE|Expr::Type::CONSTANT;
+	type.f_parser = bool_parser;
+	type.f_printer = bool_printer;
+	type.f_get_bool = bool_get_bool;
+	Expr::Type::all_types.insert(&type);
+	return type;
+}
+const ValueExprType<bool_value_t>& Bool = make_bool();

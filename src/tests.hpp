@@ -8,20 +8,6 @@
 #include <iostream>
 using std::to_string;
 
-#define FAIL_TEST(MESSAGE) throw std::runtime_error( __FILE__ " line " + std::to_string(__LINE__) + \
-	(std::string(MESSAGE)=="" ? "" : ": "+std::string(MESSAGE)))
-
-#define ASSERT(CONDITION) if(!(CONDITION)) \
-	FAIL_TEST("assertion " #CONDITION " failed")
-
-#define ASSERT_RELATION(LEFT,OPER,RIGHT) if(!( (LEFT) OPER (RIGHT) )) \
-	FAIL_TEST("assertion " #LEFT " " #OPER " " #RIGHT " failed\n" \
-	#LEFT " is " + to_string(LEFT) + "\n" #RIGHT " is " + to_string(RIGHT))
-
-#define ASSERT_APPROX_EQUAL(LEFT, RIGHT, TOLERANCE) if( abs((LEFT) - (RIGHT)) > (TOLERANCE)) \
-	FAIL_TEST("assertion " #LEFT " == " #RIGHT " failed\n" \
-	#LEFT " is " + to_string(LEFT) + "\n" #RIGHT " is " + to_string(RIGHT))
-
 struct Test{
 	inline static std::vector<Test*> all_tests;
 
