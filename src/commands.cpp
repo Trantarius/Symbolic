@@ -106,7 +106,7 @@ void _showtree(const Expr& expr, std::ostream& out, const string& prefix, const 
 		out<<prefix<<ext;
 	else
 		out<<prefix_override<<ext;
-	if(expr.type().arity==Expr::Type::NULLARY)
+	if(expr.type().arity==Type::NULLARY)
 		out<<to_string(expr)<<endl;
 	else
 		out<<expr.type().name<<endl;

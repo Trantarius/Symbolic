@@ -21,15 +21,15 @@ Expr _ExprToFromStringImpl::string_to_expr(const string& str, const string& orig
 	if(boost::regex_match(str,empty_rex))
 		throw ExprError(Expr(),__FILE__ ": " + std::to_string(__LINE__));
 
-	for(const Expr::Type* exprtype : Expr::Type::all_types){
+	for(const Type* exprtype : all_types){
 		boost::regex rex = boost::regex(rex_header+exprtype->parse_string,boost::regex_constants::mod_x);
 		boost::smatch results;
 		if(boost::regex_match(str,results,rex)){
 			if(exprtype->f_parser==nullptr){
 				Expr ret;
 				ret._type=exprtype;
-				if(exprtype->arity!=Expr::Type::NULLARY){
-					assert(results.size()==exprtype->arity+(rex_header_def_count+1UL) || exprtype->arity==Expr::Type::INFINITARY);
+				if(exprtype->arity!=Type::NULLARY){
+					assert(results.size()==exprtype->arity+(rex_header_def_count+1UL) || exprtype->arity==Type::INFINITARY);
 					for(size_t n=rex_header_def_count+1;n<results.size();n++){
 						Expr child = string_to_expr(results[n],original,results.position(n)+position);
 						if(exprtype->is_associative() && child.type()==*exprtype ||
@@ -105,23 +105,23 @@ string to_string(const Expr& expr){
 	else{
 		string target;
 		switch(expr.type().arity){
-			case Expr::Type::NULLARY:
+			case Type::NULLARY:
 				return expr.type().print_string;
-			case Expr::Type::INFINITARY:
+			case Type::INFINITARY:
 				return infinitary_to_string(expr);
-			case Expr::Type::TERNARY:
+			case Type::TERNARY:
 				if(expr[2].type().pemdas>=expr.type().pemdas && expr[2].type().pemdas>=0)
 					target = "\x1F("+to_string(expr[2])+")";
 				else
 					target = "\x1F"+to_string(expr[2]);
 				__attribute__ ((fallthrough));
-			case Expr::Type::BINARY:
+			case Type::BINARY:
 				if(expr[1].type().pemdas>=expr.type().pemdas && expr[1].type().pemdas>=0)
 					target = "\x1F("+to_string(expr[1])+")" + target;
 				else
 					target = "\x1F"+to_string(expr[1]) + target;
 				__attribute__ ((fallthrough));
-			case Expr::Type::UNARY:
+			case Type::UNARY:
 				if(expr[0].type().pemdas>=expr.type().pemdas && expr[0].type().pemdas>=0)
 					target = "\x1F("+to_string(expr[0])+")" + target;
 				else
